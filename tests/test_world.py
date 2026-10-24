@@ -2,11 +2,12 @@
 
 import math
 import random
+import warnings
 
 import pytest
 
 import bouncekit.scene as scene_mod
-from bouncekit import Ball, CircleBoundary, Scene
+from bouncekit import Ball, CircleBoundary, Scene, TunnellingWarning
 
 
 def _small(**kw: object) -> Scene:
@@ -260,3 +261,39 @@ def test_no_tunnelling_at_max_speed(angle: float) -> None:
     for _ in range(s.total_frames):
         s.step_frame()
         assert _dist(b.position, r.center) < r.radius
+
+
+@pytest.mark.parametrize("angle", [0.0, 0.7, 2.1, 4.0])
+def test_speed_clamped_after_collisions_with_spinning_ring(angle: float) -> None:
+    # Collision impulses are applied after velocity integration, so the clamp
+    # must hold at every step boundary, not only in free flight (FR-005).
+    s = _small(width=400, height=400, gravity=(0, 900), duration=2.0)
+    s.add_circle(center=(200, 200), radius=180, thickness=8, angular_velocity=2000)
+    v = (4000 * math.cos(angle), 4000 * math.sin(angle))
+    b = s.add_ball(pos=(200, 200), radius=10, velocity=v)
+    for _ in range(s.total_frames):
+        s.step_frame()
+        assert math.hypot(*b.velocity) <= s.config.max_speed * (1 + 1e-9)
+
+
+@pytest.mark.parametrize("ring_first", [True, False])
+def test_ball_too_thin_for_ring_at_max_speed_warns(ring_first: bool) -> None:
+    # Per-step travel at max_speed is 4000/480 = 8.33 px; ball radius 3 plus half
+    # of an 8 px ring is only 7 px, so the ball could tunnel (NFR-003).
+    s = _small(width=400, height=400)
+    if ring_first:
+        s.add_circle(center=(200, 200), radius=180, thickness=8)
+        with pytest.warns(TunnellingWarning, match="tunnel"):
+            s.add_ball(pos=(200, 200), radius=3)
+    else:
+        s.add_ball(pos=(200, 200), radius=3)
+        with pytest.warns(TunnellingWarning, match="tunnel"):
+            s.add_circle(center=(200, 200), radius=180, thickness=8)
+
+
+def test_thin_ball_ok_with_more_substeps() -> None:
+    s = _small(width=400, height=400, substeps=16)
+    s.add_circle(center=(200, 200), radius=180, thickness=8)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", TunnellingWarning)
+        s.add_ball(pos=(200, 200), radius=3)

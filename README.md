@@ -42,6 +42,9 @@ if __name__ == "__main__":
   `scene.run()` dispatches to the CLI (default `preview`).
 - Colours: `"#rrggbb"` strings or RGB tuples; see `bouncekit.colors`.
 - Invalid settings raise `ConfigError`.
+- Ball speed is clamped to `max_speed` after every physics step. If a ball at
+  `max_speed` could pass through a ring in one step (`max_speed / (fps * substeps)` >=
+  `ball radius + ring thickness / 2`), a `TunnellingWarning` says how to fix it.
 
 ## CLI
 

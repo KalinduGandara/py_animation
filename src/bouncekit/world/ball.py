@@ -14,8 +14,9 @@ class Ball:
     """Handle to a simulated ball.
 
     The ball is a dynamic pymunk body (density 1, so mass = pi * r^2) with a circle
-    shape of zero friction. Its speed is clamped to ``max_speed`` on every physics
-    step. ``body`` and ``shape`` are exposed as an escape hatch to pymunk.
+    shape of zero friction. The owning scene clamps its speed to ``max_speed``
+    after every physics step. ``body`` and ``shape`` are exposed as an escape
+    hatch to pymunk.
     """
 
     def __init__(
@@ -28,7 +29,6 @@ class Ball:
         elasticity: float = 1.0,
         color: ColorLike = "#ffffff",
         tags: Iterable[str] = (),
-        max_speed: float = 4000.0,
     ) -> None:
         """Validate the options, create the body and shape, and add them to ``space``.
 
@@ -41,27 +41,23 @@ class Ball:
         elasticity_value = _non_negative_number("elasticity", elasticity)
         self._color = parse_color(color)
         self._tags = _tags(tags)
-        self._max_speed = _positive_number("max_speed", max_speed)
 
         mass = math.pi * self._radius**2
         self.body = pymunk.Body(mass, pymunk.moment_for_circle(mass, 0, self._radius))
         self.body.position = position
         self.body.velocity = initial_velocity
-        self.body.velocity_func = self._update_velocity
         self.shape = pymunk.Circle(self.body, self._radius)
         self.shape.elasticity = elasticity_value
         self.shape.friction = 0.0
         space.add(self.body, self.shape)
 
-    def _update_velocity(
-        self, body: pymunk.Body, gravity: tuple[float, float], damping: float, dt: float
-    ) -> None:
-        pymunk.Body.update_velocity(body, gravity, damping, dt)
-        vx, vy = body.velocity
+    def clamp_speed(self, max_speed: float) -> None:
+        """Scale the velocity down to ``max_speed`` if it is faster, keeping direction."""
+        vx, vy = self.body.velocity
         speed = math.hypot(vx, vy)
-        if speed > self._max_speed:
-            scale = self._max_speed / speed
-            body.velocity = (vx * scale, vy * scale)
+        if speed > max_speed:
+            scale = max_speed / speed
+            self.body.velocity = (vx * scale, vy * scale)
 
     @property
     def position(self) -> Vec:

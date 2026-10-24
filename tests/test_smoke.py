@@ -27,3 +27,12 @@ def test_entry_point_declared_and_resolvable() -> None:
     assert target == "bouncekit.cli:main"
     module, _, attr = target.partition(":")
     assert callable(getattr(importlib.import_module(module), attr))
+
+
+def test_import_prints_nothing() -> None:
+    import subprocess
+    import sys
+
+    out = subprocess.run([sys.executable, "-c", "import bouncekit"],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout == ""

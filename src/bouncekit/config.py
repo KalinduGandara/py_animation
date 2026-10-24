@@ -94,6 +94,10 @@ class SceneConfig:
         if type(self.seed) is not int:
             raise ConfigError(f"seed must be an integer; got {self.seed!r}")
         duration = _positive_number("duration", self.duration)
+        if round(duration * self.fps) < 1:
+            raise ConfigError(
+                f"duration must last at least one frame (1/{self.fps} s); got {duration!r}"
+            )
         max_speed = _positive_number("max_speed", self.max_speed)
         bg_input: ColorLike = self.background
         background = parse_color(bg_input)

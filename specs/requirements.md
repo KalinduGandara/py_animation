@@ -15,7 +15,7 @@ Scope: **Milestone M0 only** (skeleton + first video, no sound).
 As a scene author, I create a `Scene` with keyword options so that one script defines one video.
 - WHEN `Scene()` is constructed with no arguments, THE SYSTEM SHALL use width 1080, height 1920, fps 60, substeps 8, duration 60 s, seed 0, background `"#000000"`, gravity `(0, 900)`.
 - WHEN `Scene(width=, height=, fps=, duration=, seed=, background=, gravity=, substeps=)` is given, THE SYSTEM SHALL store them in a `SceneConfig` dataclass exposed as `scene.config`.
-- WHEN width or height is not a positive even integer, or fps/duration/substeps are not positive, THE SYSTEM SHALL raise `ConfigError` naming the field and the bad value [C/A6].
+- WHEN width or height is not a positive even integer, fps/duration/substeps are not positive, or duration is shorter than one frame, THE SYSTEM SHALL raise `ConfigError` naming the field and the bad value [C/A6].
 - WHEN a colour string is not `#rgb`/`#rrggbb` and a colour tuple is not 3 ints in 0–255, THE SYSTEM SHALL raise `ConfigError` naming the value.
 
 ### FR-002 Coordinates — [P5]
@@ -37,7 +37,7 @@ As a scene author, I add a ball with `scene.add_ball(pos, radius, velocity=(0,0)
 ### FR-005 Fixed timestep simulation — [P1], [Phys]
 - THE SYSTEM SHALL advance the physics by exactly `substeps` steps of `1 / (fps × substeps)` seconds per frame, with no wall-clock input.
 - Frame `i` SHALL show the state after `i` frames of simulation (frame 0 = initial state); a render SHALL contain `round(duration × fps)` frames.
-- WHEN any ball's speed would exceed `scene.config.max_speed` (default 4000 px/s), THE SYSTEM SHALL clamp its velocity magnitude to `max_speed` keeping direction.
+- WHEN any ball's speed would exceed `scene.config.max_speed` (default 4000 px/s), THE SYSTEM SHALL clamp its velocity magnitude to `max_speed` keeping direction. The clamp SHALL hold after every physics step, including steps with collision impulses (e.g. from a spinning ring).
 
 ### FR-006 Seeded RNG — [P1]
 - THE SYSTEM SHALL expose `scene.rng` (a `random.Random` seeded from `seed`) as the only source of randomness for scene scripts.
@@ -76,7 +76,7 @@ As a scene author, I add a ball with `scene.add_ball(pos, radius, velocity=(0,0)
 
 - **NFR-001 Determinism** [P1], [M0], [C6], [C7]: Rendering the same scene with the same seed twice on the same machine with the locked dependencies SHALL yield identical SHA-256 hashes for every raw RGB frame. Verified by an automated test.
 - **NFR-002 Output format** [M0]: The example render SHALL be 1080×1920, 60 fps, H.264 yuv420p (verified with ffprobe).
-- **NFR-003 No tunnelling** [Phys]: A ball at `max_speed` SHALL NOT pass through an 8 px ring at the default substeps (verified by a test running a fast ball for several seconds and checking it stays inside).
+- **NFR-003 No tunnelling** [Phys]: WHEN `ball.radius + ring.thickness / 2 > max_speed / (fps × substeps)`, a ball at `max_speed` SHALL NOT pass through the ring (verified by a test running a fast ball for several seconds and checking it stays inside). WHEN a ball/ring pair violates that condition, THE SYSTEM SHALL emit a `TunnellingWarning` naming the fix (more substeps, lower max_speed, bigger ball, thicker ring). It is a warning, not an error, because `max_speed` is a worst case many scenes never reach. (Changed after review, 2026-10-24.)
 - **NFR-004 Decoupling** [P3]: The renderer SHALL only read world state; rendering a frame SHALL NOT change physics state (verified by test: physics state with and without rendering is identical).
 - **NFR-005 Tooling** [Stack], [Eng]: Python ≥ 3.11 via uv, type hints throughout; `pytest`, `ruff check`, and `mypy` pass.
 - **NFR-006 Docs** [Eng]: Public API has docstrings; `README.md` has quickstart + API overview.

@@ -171,3 +171,8 @@ def test_add_circle_accepts_edge_values() -> None:
 
     r = Scene().add_circle(center=(0, 0), radius=10, segments=8, gap_degrees=359.9)
     assert r.gap_degrees == pytest.approx(359.9)
+
+
+def test_duration_shorter_than_one_frame_rejected() -> None:
+    with pytest.raises(ConfigError, match="duration"):
+        SceneConfig(fps=60, duration=0.001)

@@ -22,6 +22,8 @@ def test_example_layout() -> None:
     assert len(rings) == 1 and len(balls) == 1
     assert (scene.config.width, scene.config.height) == (1080, 1920)
     assert tuple(balls[0].body.position) != (0, 0)
+    assert rings[0].center == (540, 960) and rings[0].radius == 450
+    assert scene.config.gravity[1] > 0
 
 
 def test_example_initial_velocity_follows_seed() -> None:

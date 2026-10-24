@@ -2,6 +2,7 @@
 
 import random
 import sys
+import warnings
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
@@ -9,6 +10,7 @@ import pymunk
 
 from bouncekit.colors import ColorLike
 from bouncekit.config import SceneConfig, Vec
+from bouncekit.errors import TunnellingWarning
 from bouncekit.export.ffmpeg import FfmpegWriter, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
@@ -70,6 +72,8 @@ class Scene:
         self.space.damping = 1.0
         self._dt = 1.0 / (self.config.fps * self.config.substeps)
         self._objects: list[WorldObject] = []
+        self._balls: list[Ball] = []
+        self._rings: list[CircleBoundary] = []
 
     @property
     def time(self) -> float:
@@ -100,6 +104,9 @@ class Scene:
 
         Raises:
             ConfigError: if any option is invalid.
+
+        Warns:
+            TunnellingWarning: if a ball at ``max_speed`` could pass through a ring.
         """
         ring = CircleBoundary(
             self.space,
@@ -113,7 +120,10 @@ class Scene:
             elasticity=elasticity,
             tags=tags,
         )
+        for ball in self._balls:
+            self._check_tunnelling(ball, ring)
         self._objects.append(ring)
+        self._rings.append(ring)
         return ring
 
     def add_ball(
@@ -130,6 +140,9 @@ class Scene:
 
         Raises:
             ConfigError: if any option is invalid.
+
+        Warns:
+            TunnellingWarning: if a ball at ``max_speed`` could pass through a ring.
         """
         ball = Ball(
             self.space,
@@ -139,15 +152,42 @@ class Scene:
             elasticity=elasticity,
             color=color,
             tags=tags,
-            max_speed=self.config.max_speed,
         )
+        for ring in self._rings:
+            self._check_tunnelling(ball, ring)
         self._objects.append(ball)
+        self._balls.append(ball)
         return ball
+
+    def _check_tunnelling(self, ball: Ball, ring: CircleBoundary) -> None:
+        """Warn about a ball/ring pair that a ball at ``max_speed`` could pass through.
+
+        A collision is caught only if the ball cannot move past a segment's centre
+        line in one step, so per-step travel must be below ``radius + thickness / 2``.
+        This is a warning, not an error: ``max_speed`` is a worst case that many
+        scenes never reach.
+        """
+        travel = self.config.max_speed * self._dt
+        reach = ball.radius + ring.thickness / 2
+        if travel >= reach:
+            warnings.warn(
+                f"ball radius {ball.radius} with ring thickness {ring.thickness} could tunnel: "
+                f"at max_speed {self.config.max_speed} a ball moves {travel:.2f} px per step "
+                f"but radius + thickness/2 is only {reach:.2f} px; increase substeps, "
+                f"lower max_speed, or use a larger ball or thicker ring",
+                TunnellingWarning,
+                stacklevel=3,
+            )
 
     def step_frame(self) -> None:
         """Advance the simulation by one frame (``substeps`` fixed physics steps)."""
+        max_speed = self.config.max_speed
         for _ in range(self.config.substeps):
             self.space.step(self._dt)
+            # Clamp after the whole step: collision impulses land after velocity
+            # integration, so a clamp inside velocity_func would miss them.
+            for ball in self._balls:
+                ball.clamp_speed(max_speed)
         self.frame += 1
 
     def draw(self, renderer: Renderer) -> None:
