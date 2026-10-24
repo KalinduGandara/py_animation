@@ -24,8 +24,17 @@ def test_gravity_positive_y_is_down() -> None:
 
 
 def test_custom_values_stored() -> None:
-    c = SceneConfig(width=100, height=200, fps=30, duration=2.5, seed=7,
-                    background="#fff", gravity=(1, 2), substeps=4, max_speed=10)
+    c = SceneConfig(
+        width=100,
+        height=200,
+        fps=30,
+        duration=2.5,
+        seed=7,
+        background="#fff",
+        gravity=(1, 2),
+        substeps=4,
+        max_speed=10,
+    )
     assert (c.width, c.height, c.fps, c.duration, c.seed) == (100, 200, 30, 2.5, 7)
     assert c.background == (255, 255, 255)
     assert c.gravity == (1.0, 2.0)
@@ -83,8 +92,9 @@ def test_bad_colour_strings(bad: str) -> None:
     assert repr(bad) in str(e.value)
 
 
-@pytest.mark.parametrize("bad", [(1, 2), (1, 2, 3, 4), (256, 0, 0), (-1, 0, 0), (1.5, 0, 0),
-                                 (True, 0, 0), 5, None])
+@pytest.mark.parametrize(
+    "bad", [(1, 2), (1, 2, 3, 4), (256, 0, 0), (-1, 0, 0), (1.5, 0, 0), (True, 0, 0), 5, None]
+)
 def test_bad_colour_tuples(bad: object) -> None:
     with pytest.raises(ConfigError):
         parse_color(bad)  # type: ignore[arg-type]

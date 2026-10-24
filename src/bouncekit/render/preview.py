@@ -82,9 +82,7 @@ class Preview:
         if self.screen.get_size() == self.renderer.surface.get_size():
             self.screen.blit(self.renderer.surface, (0, 0))
         else:
-            pygame.transform.smoothscale(
-                self.renderer.surface, self.screen.get_size(), self.screen
-            )
+            pygame.transform.smoothscale(self.renderer.surface, self.screen.get_size(), self.screen)
         if not self.paused and scene.frame < scene.total_frames:
             scene.step_frame()
         pygame.display.set_caption(self._title())

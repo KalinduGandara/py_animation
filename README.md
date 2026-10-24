@@ -47,6 +47,40 @@ if __name__ == "__main__":
   `ball radius + ring thickness / 2`), `add_ball`/`add_circle` raise `ConfigError`
   saying how to fix it (more `substeps`, lower `max_speed`, bigger ball, thicker ring).
 
+## Sound (M1)
+
+Collisions can play notes. Tag objects, register a rule, and `render` muxes an
+AAC track (48 kHz stereo) into the MP4. Scenes with no sound rules stay
+video-only; `preview` is always silent.
+
+```python
+from bouncekit import Scene
+from bouncekit import actions as A
+from bouncekit import sound as S
+
+scene = Scene(duration=10.0, seed=42)
+scene.add_circle(center=(540, 960), radius=450, tags={"wall"})
+scene.add_ball(pos=(540, 700), radius=30, tags={"ball"})
+scene.on_collision("ball", "wall", [A.play(S.scale("C4", voice="pluck"))])
+```
+
+See `examples/bounce_notes.py` (`uv run bouncekit render examples/bounce_notes.py`).
+
+- `scene.on_collision(tag_a, tag_b, [A.play(...)])` - when tagged objects start
+  touching (either order), run the actions. Rules run in registration order.
+- `A.play(source, gain=1.0)` - play a sound source.
+- Sound sources: `S.note("C4", voice="sine")` always plays one pitch (a name like
+  `"C#4"` or a frequency in Hz); `S.scale("C4", mode="major_pentatonic", octaves=2,
+  voice="sine")` plays the next scale note on each trigger and wraps. Modes: `major`,
+  `minor`, `major_pentatonic`, `minor_pentatonic`, `chromatic`.
+- Voices: `"sine"`, `"triangle"`, `"pluck"` (Karplus-Strong), `"marimba"`, or an
+  instance such as `Pluck(duration=0.5)`.
+- `AudioConfig` (pass as `Scene(audio=AudioConfig(...))`), defaults: `min_impact_speed=40`
+  px/s, `reference_speed=1500` px/s (full gain), `min_retrigger_interval=0.05` s,
+  `max_triggers_per_frame=6`, `max_polyphony=24`, `peak_dbfs=-1.0`.
+- Louder impacts play louder; the mix is normalised to `peak_dbfs`. Output is
+  deterministic for a given seed.
+
 ## CLI
 
 `bouncekit render <scene.py> [--seed N] [--duration S] [--out PATH]` and

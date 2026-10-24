@@ -193,9 +193,7 @@ def test_usage_error_exits_nonzero() -> None:
 
 def test_default_scene_without_subcommand_previews(monkeypatch: pytest.MonkeyPatch) -> None:
     seeds: list[int] = []
-    monkeypatch.setattr(
-        cli, "run_preview", lambda make, _scale: seeds.append(make().config.seed)
-    )
+    monkeypatch.setattr(cli, "run_preview", lambda make, _scale: seeds.append(make().config.seed))
     assert cli.main(["--seed", "4"], default_scene=TINY) == 0
     assert cli.main([], default_scene=TINY) == 0
     assert seeds == [4, 7]

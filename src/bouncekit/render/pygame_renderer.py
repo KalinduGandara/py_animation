@@ -39,8 +39,7 @@ class PygameRenderer:
         def distance(px: Floats, py: Floats) -> Floats:
             return np.hypot(px - cx, py - cy) - radius
 
-        self._fill_distance((cx - radius, cy - radius, cx + radius, cy + radius),
-                            distance, color)
+        self._fill_distance((cx - radius, cy - radius, cx + radius, cy + radius), distance, color)
 
     def thick_line(self, a: Vec, b: Vec, width: float, color: Color) -> None:
         """Draw a line ``width`` pixels thick from ``a`` to ``b`` with round caps.
@@ -51,8 +50,12 @@ class PygameRenderer:
         ax, ay = a
         dx, dy = b[0] - ax, b[1] - ay
         length_sq = dx * dx + dy * dy
-        bbox = (min(ax, b[0]) - half, min(ay, b[1]) - half,
-                max(ax, b[0]) + half, max(ay, b[1]) + half)
+        bbox = (
+            min(ax, b[0]) - half,
+            min(ay, b[1]) - half,
+            max(ax, b[0]) + half,
+            max(ay, b[1]) + half,
+        )
 
         def distance(px: Floats, py: Floats) -> Floats:
             if length_sq == 0:
@@ -79,8 +82,9 @@ class PygameRenderer:
         full = end_degrees - start_degrees >= 360
         start = math.radians(start_degrees)
         span = math.radians(end_degrees - start_degrees)
-        caps = [(cx + radius * math.cos(t), cy + radius * math.sin(t))
-                for t in (start, start + span)]
+        caps = [
+            (cx + radius * math.cos(t), cy + radius * math.sin(t)) for t in (start, start + span)
+        ]
 
         def near_band(px: Floats, py: Floats) -> Mask:
             # Every covered pixel, caps included, lies within half + 1 of the circle.
@@ -94,8 +98,13 @@ class PygameRenderer:
             # Inside the swept angle the band distance applies; outside it the
             # nearest point is one of the two round caps.
             rel = np.mod(np.arctan2(py - cy, px - cx) - start, 2 * math.pi)
-            to_caps = np.minimum(np.hypot(px - caps[0][0], py - caps[0][1]),
-                                 np.hypot(px - caps[1][0], py - caps[1][1])) - half
+            to_caps = (
+                np.minimum(
+                    np.hypot(px - caps[0][0], py - caps[0][1]),
+                    np.hypot(px - caps[1][0], py - caps[1][1]),
+                )
+                - half
+            )
             result: Floats = np.where(rel <= span, band, to_caps)
             return result
 
@@ -121,8 +130,11 @@ class PygameRenderer:
         y1 = min(math.ceil(bbox[3]) + 2, self.height)
         if x0 >= x1 or y0 >= y1:
             return
-        px, py = np.meshgrid(np.arange(x0, x1, dtype=np.float64) + 0.5,
-                             np.arange(y0, y1, dtype=np.float64) + 0.5, indexing="ij")
+        px, py = np.meshgrid(
+            np.arange(x0, x1, dtype=np.float64) + 0.5,
+            np.arange(y0, y1, dtype=np.float64) + 0.5,
+            indexing="ij",
+        )
         mask = np.ones(px.shape, dtype=bool) if candidates is None else candidates(px, py)
         coverage = np.clip(0.5 - distance(px[mask], py[mask]), 0.0, 1.0)
         covered = coverage > 0

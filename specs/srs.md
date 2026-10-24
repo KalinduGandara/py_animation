@@ -32,33 +32,52 @@ Work in the milestones below. **Stop after each milestone**, show me what you bu
 ```python
 from bouncekit import Scene, actions as A, sound as S, colors as C
 
-scene = Scene(width=1080, height=1920, fps=60, duration=60, seed=42,
-              background="#0b0b12", gravity=(0, 900))
+scene = Scene(
+    width=1080, height=1920, fps=60, duration=60, seed=42, background="#0b0b12", gravity=(0, 900)
+)
 
-ring = scene.add_circle(center=(540, 960), radius=450, thickness=8,
-                        color="#ffffff", gap_degrees=0, angular_velocity=0,
-                        tags={"wall"})
+ring = scene.add_circle(
+    center=(540, 960),
+    radius=450,
+    thickness=8,
+    color="#ffffff",
+    gap_degrees=0,
+    angular_velocity=0,
+    tags={"wall"},
+)
 
-scene.add_ball(pos=(540, 700), radius=20, velocity=(300, 0),
-               elasticity=1.0, color=C.hue_cycle(), trail=True,
-               tags={"ball"})
+scene.add_ball(
+    pos=(540, 700),
+    radius=20,
+    velocity=(300, 0),
+    elasticity=1.0,
+    color=C.hue_cycle(),
+    trail=True,
+    tags={"ball"},
+)
 
-scene.on_collision("ball", "wall", [
-    A.split(into=2, spread_degrees=30, max_total=500),
-    A.play(S.melody("assets/midi/song.mid", voice="pluck")),
-    A.flash(ring, seconds=0.08),
-])
+scene.on_collision(
+    "ball",
+    "wall",
+    [
+        A.split(into=2, spread_degrees=30, max_total=500),
+        A.play(S.melody("assets/midi/song.mid", voice="pluck")),
+        A.flash(ring, seconds=0.08),
+    ],
+)
+
 
 @scene.on_collision("ball", "ball")
-def custom(ctx, a, b, contact):          # escape hatch: plain Python
+def custom(ctx, a, b, contact):  # escape hatch: plain Python
     if a.radius > 30:
         ctx.destroy(a)
+
 
 scene.on_escape(ring, "ball", [A.destroy(), A.play(S.note("C6"))])
 scene.when(lambda w: w.count("ball") >= 500, A.end_after(seconds=3))
 
 if __name__ == "__main__":
-    scene.run()   # CLI decides: preview or render
+    scene.run()  # CLI decides: preview or render
 ```
 
 Object methods return handles (`Ball`, `CircleBoundary`, ...) that rules and callbacks can reference. Options are keyword arguments with sensible defaults. Use dataclasses for config, not loose dicts.

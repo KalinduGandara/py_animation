@@ -34,8 +34,17 @@ def test_scene_defaults_and_config() -> None:
 
 
 def test_scene_custom_config() -> None:
-    s = Scene(width=100, height=50, fps=30, duration=2.5, seed=4, background="#123",
-              gravity=(1, 2), substeps=3, max_speed=50)
+    s = Scene(
+        width=100,
+        height=50,
+        fps=30,
+        duration=2.5,
+        seed=4,
+        background="#123",
+        gravity=(1, 2),
+        substeps=3,
+        max_speed=50,
+    )
     assert s.config.background == (0x11, 0x22, 0x33)
     assert s.config.substeps == 3
     assert s.total_frames == 75
@@ -109,8 +118,9 @@ def test_one_frame_is_substeps_fixed_steps() -> None:
 
 def test_ball_properties() -> None:
     s = _small()
-    b = s.add_ball(pos=(10, 20), radius=7, velocity=(3, 4), color="#ff0000",
-                   tags={"a", "b"}, elasticity=0.5)
+    b = s.add_ball(
+        pos=(10, 20), radius=7, velocity=(3, 4), color="#ff0000", tags={"a", "b"}, elasticity=0.5
+    )
     assert b.position == pytest.approx((10, 20))
     assert b.velocity == pytest.approx((3, 4))
     assert b.radius == 7
@@ -148,8 +158,15 @@ def test_speed_clamp_under_gravity_uses_config() -> None:
 
 def test_ring_properties_and_segments() -> None:
     s = _small()
-    r = s.add_circle(center=(100, 100), radius=80, thickness=6, color="#0f0",
-                     gap_degrees=0, segments=32, tags=["ring"])
+    r = s.add_circle(
+        center=(100, 100),
+        radius=80,
+        thickness=6,
+        color="#0f0",
+        gap_degrees=0,
+        segments=32,
+        tags=["ring"],
+    )
     assert r.center == pytest.approx((100, 100))
     assert (r.radius, r.thickness, r.gap_degrees) == (80, 6, 0)
     assert r.color == (0, 255, 0)

@@ -15,9 +15,7 @@ DEFAULT_SCALE = 0.45
 ERROR_EXIT = 2
 
 
-def load_scene(
-    path: str | Path, seed: int | None = None, duration: float | None = None
-) -> Scene:
+def load_scene(path: str | Path, seed: int | None = None, duration: float | None = None) -> Scene:
     """Execute a scene script and return its single module-level ``Scene``.
 
     ``seed`` and ``duration`` (when not ``None``) override the script's own

@@ -9,10 +9,17 @@ from bouncekit import Scene  # noqa: E402
 
 
 def _make_scene(seed: int) -> Scene:
-    s = Scene(width=270, height=480, fps=30, duration=2.0, seed=seed, background="#101018",
-              max_speed=3000)
-    s.add_circle(center=(135, 240), radius=120, thickness=6, color="#ffffff",
-                 gap_degrees=30, angular_velocity=60)
+    s = Scene(
+        width=270, height=480, fps=30, duration=2.0, seed=seed, background="#101018", max_speed=3000
+    )
+    s.add_circle(
+        center=(135, 240),
+        radius=120,
+        thickness=6,
+        color="#ffffff",
+        gap_degrees=30,
+        angular_velocity=60,
+    )
     vx = s.rng.uniform(-600.0, 600.0)
     vy = s.rng.uniform(-600.0, 600.0)
     s.add_ball(pos=(135, 200), radius=10, velocity=(vx, vy), color="#ff4060")

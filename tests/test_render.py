@@ -104,8 +104,9 @@ def test_scene_draw_shows_gap() -> None:
 def test_scene_draw_follows_rotation() -> None:
     # 90 deg/s clockwise for 1 s moves the gap from +x to +y (down on screen).
     s = _scene(duration=1.0)
-    ring = s.add_circle(center=(100, 100), radius=80, thickness=8, color=GREEN,
-                        gap_degrees=60, angular_velocity=90)
+    ring = s.add_circle(
+        center=(100, 100), radius=80, thickness=8, color=GREEN, gap_degrees=60, angular_velocity=90
+    )
     for _ in range(30):
         s.step_frame()
     assert abs(ring.angle_degrees - 90) < 1e-6
@@ -159,8 +160,7 @@ def test_frames_first_frame_is_initial_state_then_steps() -> None:
 
 def _physics_scene() -> Scene:
     s = _scene(duration=1.0, gravity=(0.0, 900.0))
-    s.add_circle(center=(100, 100), radius=80, color=GREEN, gap_degrees=40,
-                 angular_velocity=45)
+    s.add_circle(center=(100, 100), radius=80, color=GREEN, gap_degrees=40, angular_velocity=45)
     s.add_ball(pos=(100, 80), radius=8, velocity=(300.0, -100.0), color=RED)
     return s
 
@@ -236,8 +236,9 @@ def test_circle_edge_matches_analytic_coverage() -> None:
 
 def test_gap_arc_ends_at_physics_segment_ends() -> None:
     s = _scene(width=200, height=200, background=(0, 0, 0))
-    ring = s.add_circle(center=(100, 100), radius=80, thickness=8, gap_degrees=60,
-                        color=(255, 255, 255))
+    ring = s.add_circle(
+        center=(100, 100), radius=80, thickness=8, gap_degrees=60, color=(255, 255, 255)
+    )
     r = PygameRenderer(200, 200)
     s.draw(r)
     data = r.to_rgb_bytes()

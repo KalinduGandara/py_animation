@@ -27,6 +27,7 @@
 - 2026-10-24: T-101 done: events.py (`EventRecorder` wildcard begin/separate, per-pair contact count + per-step merge), sound.py (`pitch_to_hz`, `note`), actions.py (`play`), audio/voices.py (`ADSR`, `Sine`), audio/mixer.py (`sample_offset`, `num_samples`, `mix`: tanh + normalise + 5 ms fade), export/audio.py (`write_wav`), ffmpeg `mux`, `AudioConfig`, `Scene.on_collision/events/triggers/has_sound/audio_buffer`, render muxes AAC when sound rules exist; `soundfile` added (mypy override: no stubs). Probe: seam landing = 2 begins -> 1 event; rolling 3 s = 85 begins -> 1 event. Tests: test_events/test_sound/test_mixer/test_audio_export; gate passes (~8 s).
 - 2026-10-24: T-102 done: audio/voices.py `Triangle` (exact triangle x ADSR), `Pluck` (Karplus-Strong, vectorised per period, noise from `default_rng([seed, hz, damping])`, delay `round(48000/hz - 0.5)` to cancel the averaging filter's half-sample lag), `Marimba` (partials 1/3.93/9.3, >20 kHz dropped); `Voice` union, `VOICES` has 4 names, `resolve_voice` accepts all types; sound.py re-exports them; mixer's `(voice, hz, seed)` cache verified (one render per key). tests/test_voices.py (pitch by autocorrelation within 2% at 220/440/880 Hz); gate passes.
 - 2026-10-24: T-103 done: sound.py `Scale`/`scale` (5 modes, octaves 1..8, top root, identity-hashed; top note > 20 kHz is a ConfigError), `Play` accepts `Scale`; `AudioConfig` validates every field; `Scene._dispatch` applies min impact speed, retrigger interval per (play, object a) on exact step gaps, per-frame cap, gain curve, per-scene scale cursor advanced only by played notes; mixer steals the oldest note with a linear 5 ms fade when `max_polyphony` notes sound (triggers mixed in offset order). Tests: test_scale.py, test_policy.py (incl. AudioConfig cases); test_events gain assertion updated to the FR-106 curve (was the documented T-101 staging value). Gate passes.
+- 2026-10-24: T-104 done: examples/bounce_notes.py (ring tagged wall, ball tagged ball, scale-pluck rule), README Sound (M1) section, new tests in test_example.py (layout, aac 48 kHz stereo stream, WAV onset at trigger offset, README keywords); example rendered and ffprobe-verified (h264 + aac 48000 Hz stereo). Gate passes.
 
 ## Traceability (requirement -> tests)
 
@@ -59,10 +60,13 @@
 | FR-106 | test_policy.py: test_gain_curve, test_gain_uses_reference_speed, test_below_min_impact_speed_is_ignored, test_retrigger_interval_per_play_and_object, test_retrigger_interval_counts_from_last_played_note, test_per_frame_cap_drops_later_events_in_order, test_per_frame_cap_in_simulation, test_polyphony_steals_oldest_with_linear_5ms_fade, test_finished_notes_do_not_count_as_sounding; test_events.py::test_rule_produces_trigger_per_matching_event |
 | FR-108 | test_mixer.py::test_audio_config_defaults_and_scene; test_policy.py: test_bad_audio_config_names_field_and_value, test_audio_config_edge_values_and_coercion |
 | FR-109 | test_audio_export.py: test_write_wav_float32_roundtrip, test_render_with_sound_muxes_aac, test_render_without_sound_rules_has_no_audio_stream, test_temp_files_removed_when_mux_fails, test_mux_failure_raises_with_stderr, test_mux_command_flags |
+| FR-110 | test_example.py: test_bounce_notes_layout, test_bounce_notes_render_has_aac_and_aligned_onset, test_readme_documents_audio |
+| NFR-104 | test_example.py::test_readme_documents_audio (docs); public API docstrings |
+| NFR-105 | test_example.py::test_bounce_notes_render_has_aac_and_aligned_onset (example renders) |
 | NFR-101 | test_events.py: test_same_seed_identical_events_and_audio, test_different_seed_differs; test_mixer.py::test_mix_is_deterministic; test_voices.py::test_mix_with_every_voice_is_deterministic |
 | NFR-102 | test_mixer.py::test_isolated_note_starts_exactly_at_offset; test_audio_export.py::test_render_with_sound_muxes_aac (durations within 50 ms) |
 | NFR-103 | test_mixer.py::test_two_hundred_full_gain_triggers_respect_headroom |
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) in progress: T-101, T-102, T-103 done; next: T-104.
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done.

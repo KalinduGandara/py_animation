@@ -12,8 +12,9 @@ from bouncekit.render.preview import Preview, run_preview
 
 
 def make_scene() -> Scene:
-    scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=3, gravity=(0.0, 100.0),
-                  max_speed=1500)
+    scene = Scene(
+        width=64, height=48, fps=30, duration=0.5, seed=3, gravity=(0.0, 100.0), max_speed=1500
+    )
     scene.add_circle(center=(32, 24), radius=20, segments=32)
     scene.add_ball(pos=(32, 24), radius=4, velocity=(30.0, 10.0))
     return scene
