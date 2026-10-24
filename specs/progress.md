@@ -48,6 +48,7 @@
 - 2026-10-24: T-401 done: `params.py` (check_name/check_default/parse_value/suffix), `Scene.param`/`Scene.params` + `_param_overrides`, `load_scene(params=)` with unknown-param ConfigError, `--set` on render/preview (parse_assignments, exit 2 on malformed/repeated), preview reload and `Scene.preview` restart keep overrides, `export/metadata.py` (atomic JSON, FR-405 key order), `batch.Job/JobResult/run_job` used by `render` (default name `<stem>_seed<N><suffix>.mp4`, partial MP4/JSON deleted on failure); tests in tests/test_params.py, tests/test_metadata.py, fixture param_scene.py; 863 tests in 42 s; gate passes.
 - 2026-10-24: T-402 done: `batch.parse_seeds/parse_grid/plan_jobs` (seed-major product, last grid fastest, FR-402 names, (seed, suffix) collision and --set/--grid repeat checks), `run_batch` (in-process for --jobs 1, spawn ProcessPoolExecutor for N, worker crash → failed result), `bouncekit batch` (--seeds/--set/--grid/--duration/--jobs/--out-dir/--quiet, ffmpeg pre-check, `[i/n] wrote`/`FAILED` lines, `batch: X ok, Y failed`, exit 0/1/2); tests in tests/test_batch.py with fixture flaky_scene.py; 894 tests in 43 s; gate passes.
 - 2026-10-24: T-403 done: `progress.Progress` (TTY-only, 0.1 s throttle, injectable clock, ETA, padding, write/close), `Scene.render(progress=)` called after each frame, `--quiet` on render (and batch bar), bar wired into render (frames) and batch (jobs, per-job lines via `Progress.write`); tests in tests/test_progress.py; gate passes.
+- 2026-10-24: T-404 done: `Renderer.text` + `PygameRenderer.text` (freetype default font, per-size cache, blank no-op), `text.py` (`Text`, `make_text`, `visible`), `Scene.add_text`/`texts`, text drawn after glow with multi-line layout and callable text; tests in tests/test_text.py; gate passes. Deviation: vertical centring uses font ascender+descender (excl. line gap) with half-up rounding so the ink of "Hi" is within 3 px of centre.
 
 ## Traceability (requirement -> tests)
 
@@ -113,4 +114,4 @@
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 in progress: T-401..T-403 done; next T-404.
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 in progress: T-401..T-404 done; next T-405.

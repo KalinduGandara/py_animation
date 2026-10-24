@@ -9,6 +9,7 @@ from bouncekit import actions, colors, sound
 from bouncekit.config import AudioConfig, EffectsConfig
 from bouncekit.errors import ConfigError
 from bouncekit.scene import Scene
+from bouncekit.text import Text
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -21,6 +22,7 @@ __all__ = [
     "ConfigError",
     "EffectsConfig",
     "Scene",
+    "Text",
     "__version__",
     "actions",
     "colors",

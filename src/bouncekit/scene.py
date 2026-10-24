@@ -51,6 +51,7 @@ from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.rules.commands import BallSpec, Command, apply
 from bouncekit.rules.engine import SUBJECTS, Rule, RuleEngine, RuleKind
 from bouncekit.sound import Melody, Note, Scale
+from bouncekit.text import Text, make_text
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -163,6 +164,7 @@ class Scene:
         self._recorder.install(self.space)
         self._param_src: dict[str, str] = dict(_param_overrides)  # CLI text per name
         self._params: dict[str, tuple[ParamValue, ParamValue]] = {}  # name -> (default, value)
+        self._texts: list[Text] = []  # overlays in add_text order (FR-406)
 
     def param(self, name: str, default: ParamValue) -> ParamValue:
         """Declare a param and return its value: the CLI override or ``default``.
@@ -824,6 +826,33 @@ class Scene:
         self._balls.append(ball)
         return ball
 
+    def add_text(
+        self,
+        text: str | Callable[["Scene"], str],
+        *,
+        pos: Vec,
+        size: float = 64.0,
+        color: ColorLike = "#ffffff",
+        start: float = 0.0,
+        end: float | None = None,
+    ) -> Text:
+        """Add a text overlay centred on ``pos`` (screen px), drawn after everything else.
+
+        ``text`` is a ``str`` (``"\\n"`` separates lines) or ``f(scene) -> str`` evaluated
+        at each draw. It is visible at frames ``round(start * fps) <= f < round(end * fps)``
+        (no upper bound when ``end`` is ``None``). It is not a world object (FR-406).
+        """
+        item = make_text(
+            text, pos=pos, size=size, color=color, start=start, end=end, fps=self.config.fps
+        )
+        self._texts.append(item)
+        return item
+
+    @property
+    def texts(self) -> tuple[Text, ...]:
+        """The text overlays, in ``add_text`` order."""
+        return tuple(self._texts)
+
     def _check_constant_speed(self, velocity: Vec) -> None:
         """Reject a constant-speed initial velocity of speed 0 or above ``max_speed``."""
         speed = math.hypot(*velocity)
@@ -916,7 +945,7 @@ class Scene:
 
         Order: background; the trail layer (only while a ball has ``trail``); objects
         in insertion order; impact particles (FR-305); the glow layer (only while an
-        object has ``glow``). An
+        object has ``glow``); then visible text overlays (FR-406). An
         object flashing at the current frame (``A.flash``) is drawn, and glows, in its
         flash colour blended linearly back to its base colour. Drawing never changes
         the simulation; it only updates effect state keyed on ``frame``, so redrawing
@@ -955,6 +984,20 @@ class Scene:
             renderer.circle((p.x, p.y), p.size, p.color, alpha=1 - p.age / p.life)
         if lights:
             renderer.glow(lights, blur=effects.glow_blur)
+        for item in self._texts:
+            if item.visible(self.frame):
+                self._draw_text(renderer, item)
+
+    def _draw_text(self, renderer: Renderer, item: Text) -> None:
+        """Draw one visible overlay line by line (FR-406)."""
+        value = item.text(self) if callable(item.text) else item.text
+        if not isinstance(value, str):
+            raise ConfigError(f"text callable must return a str; got {value!r}")
+        lines = value.split("\n")
+        pitch = round(1.2 * item.size)
+        x, y = item.pos
+        for k, line in enumerate(lines):
+            renderer.text(line, (x, y + (k - (len(lines) - 1) / 2) * pitch), item.size, item.color)
 
     def frames(self) -> Iterator[bytes]:
         """Yield each remaining frame as RGB24 bytes, then advance one frame.

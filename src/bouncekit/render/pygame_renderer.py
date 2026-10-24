@@ -5,6 +5,7 @@ from collections.abc import Callable, Sequence
 
 import numpy as np
 import pygame
+import pygame.freetype
 from numpy.typing import NDArray
 
 from bouncekit.colors import Color
@@ -46,6 +47,7 @@ class PygameRenderer:
         self._trail: tuple[Layer, NDArray[np.uint8], pygame.Surface] | None = None
         self._trail_box: Box | None = None  # every non-zero layer pixel is inside
         self._glow: tuple[pygame.Surface, pygame.Surface, pygame.Surface] | None = None
+        self._fonts: dict[float, pygame.freetype.Font] = {}  # per size (FR-407)
 
     def clear(self, color: Color) -> None:
         """Fill the whole frame with ``color``."""
@@ -288,6 +290,25 @@ class PygameRenderer:
         mask[mask] = covered
         weight: Floats = coverage[covered][:, None]
         return x0, x1, y0, y1, mask, weight
+
+    def text(self, text: str, center: Vec, size: float, color: Color) -> None:
+        """Draw one line of text with the default freetype font (FR-407)."""
+        if not text.strip():
+            return
+        font = self._fonts.get(size)
+        if font is None:
+            if not pygame.freetype.get_init():
+                pygame.freetype.init()
+            font = pygame.freetype.Font(None, size)
+            font.antialiased = True
+            font.origin = True
+            self._fonts[size] = font
+        advance = sum(m[4] for m in font.get_metrics(text) if m is not None)
+        ascent = font.get_sized_ascender(size)
+        descent = font.get_sized_descender(size)  # negative: below the baseline
+        x = math.floor(center[0] - advance / 2 + 0.5)
+        baseline = math.floor(center[1] + (ascent + descent) / 2 + 0.5)  # half up
+        font.render_to(self.surface, (x, baseline), text, color, size=size)
 
     def to_rgb_bytes(self) -> bytes:
         """Return the frame as packed RGB24 bytes (``width * height * 3``)."""

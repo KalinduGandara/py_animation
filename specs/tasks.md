@@ -194,7 +194,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `cli.main(["render", …])` under capsys (not a TTY) has no `\r` on stderr. With a forced TTY stream (monkeypatched `isatty`) it shows the bar, and `--quiet` suppresses it.
     - The batch bar shows `jobs`.
 
-- [ ] T-404: Text overlay.
+- [x] T-404: Text overlay.
   - Scope:
     - `Renderer.text` protocol method.
     - `PygameRenderer.text`: freetype default font, per-size cache, advance/line-box centring, empty text no-op.

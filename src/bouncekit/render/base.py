@@ -101,6 +101,15 @@ class Renderer(Protocol):
         """
         ...
 
+    def text(self, text: str, center: Vec, size: float, color: Color) -> None:
+        """Draw one line of ``text``, anti-aliased and alpha-blended over the frame.
+
+        The line's advance box is centred horizontally on ``center.x`` and its line box
+        (ascender to descender, the font's sized height) vertically on ``center.y``.
+        Empty or whitespace-only text draws nothing.
+        """
+        ...
+
     def to_rgb_bytes(self) -> bytes:
         """Return the frame as packed RGB24 bytes (``width * height * 3``)."""
         ...
