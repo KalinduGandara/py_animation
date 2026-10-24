@@ -12,7 +12,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: errors.py, colors.py, config.py, tests/test_config.py
   - Done when: defaults, every validation error (odd/zero size, fps, duration, substeps, max_speed, bad colours) are tested and pass.
 
-- [ ] T-003: World — Scene core (config, rng, overrides hook, object registry, step loop), Ball (velocity clamp), CircleBoundary (segments, gap, rotation, neighbours).
+- [x] T-003: World — Scene core (config, rng, overrides hook, object registry, step loop), Ball (velocity clamp), CircleBoundary (segments, gap, rotation, neighbours).
   - Requirements: FR-001, FR-002, FR-003, FR-004, FR-005, FR-006, NFR-003
   - Files: scene.py, world/ball.py, world/circle.py, tests/test_world.py, tests/test_config.py
   - Done when: tests for gravity direction, closed ring containment, gap escape, rotation angle after N frames, step/frame counting, speed clamp, no tunnelling at max_speed, seam smoothness, add_* validation all pass.

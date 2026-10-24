@@ -101,3 +101,73 @@ def test_good_colours() -> None:
 def test_bad_background_raises_config_error() -> None:
     with pytest.raises(ConfigError):
         SceneConfig(background="nope")
+
+
+# --- Scene / add_* validation (FR-001, FR-003, FR-004) -----------------------
+
+
+def test_scene_validates_config() -> None:
+    from bouncekit import Scene
+
+    with pytest.raises(ConfigError, match="width"):
+        Scene(width=101)
+    with pytest.raises(ConfigError, match="fps"):
+        Scene(fps=0)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"radius": 0}, "radius"),
+        ({"radius": -5}, "radius"),
+        ({"radius": float("nan")}, "radius"),
+        ({"thickness": 0}, "thickness"),
+        ({"thickness": -1}, "thickness"),
+        ({"segments": 7}, "segments"),
+        ({"segments": 8.0}, "segments"),
+        ({"gap_degrees": -1}, "gap_degrees"),
+        ({"gap_degrees": 360}, "gap_degrees"),
+        ({"angular_velocity": float("inf")}, "angular_velocity"),
+        ({"elasticity": -0.1}, "elasticity"),
+        ({"color": "nope"}, "nope"),
+        ({"center": (1, 2, 3)}, "center"),
+        ({"tags": [1]}, "tags"),
+    ],
+)
+def test_add_circle_validation(kwargs: dict[str, object], field: str) -> None:
+    from bouncekit import Scene
+
+    opts: dict[str, object] = {"center": (0, 0), "radius": 10}
+    opts.update(kwargs)
+    with pytest.raises(ConfigError, match=field):
+        Scene().add_circle(**opts)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field"),
+    [
+        ({"radius": 0}, "radius"),
+        ({"radius": -1}, "radius"),
+        ({"radius": float("inf")}, "radius"),
+        ({"pos": (1,)}, "pos"),
+        ({"pos": (float("nan"), 0)}, "pos"),
+        ({"velocity": "fast"}, "velocity"),
+        ({"elasticity": float("nan")}, "elasticity"),
+        ({"color": (300, 0, 0)}, "300"),
+        ({"tags": "ab"}, "tags"),
+    ],
+)
+def test_add_ball_validation(kwargs: dict[str, object], field: str) -> None:
+    from bouncekit import Scene
+
+    opts: dict[str, object] = {"pos": (0, 0), "radius": 5}
+    opts.update(kwargs)
+    with pytest.raises(ConfigError, match=field):
+        Scene().add_ball(**opts)  # type: ignore[arg-type]
+
+
+def test_add_circle_accepts_edge_values() -> None:
+    from bouncekit import Scene
+
+    r = Scene().add_circle(center=(0, 0), radius=10, segments=8, gap_degrees=359.9)
+    assert r.gap_degrees == pytest.approx(359.9)
