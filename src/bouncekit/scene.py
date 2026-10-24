@@ -63,6 +63,10 @@ _overrides: dict[str, object] = {}
 # Param overrides (name -> CLI text) set by the CLI while it executes a scene script;
 # ``Scene.__init__`` copies them and ``Scene.param`` parses them (FR-401, FR-402).
 _param_overrides: dict[str, str] = {}
+# Callbacks set by the CLI while it executes a scene script; ``Scene.__init__`` calls
+# each with the final seed, so a batch worker can name its output before the script
+# finishes loading (FR-404 crash cleanup).
+_seed_listeners: list[Callable[[int], None]] = []
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -125,6 +129,8 @@ class Scene:
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
+        for listener in _seed_listeners:
+            listener(self.config.seed)
         self.rng: random.Random = random.Random(self.config.seed)
         self.fx_rng: random.Random = random.Random(f"bouncekit-fx:{self.config.seed}")
         """Random stream for visual effects only (FR-301); never affects physics."""

@@ -21,12 +21,20 @@ speed = float(scene.param("speed", 400.0))  # ball speed in px/s
 hue_step = float(scene.param("hue_step", 25.0))  # hue change per new ball, degrees
 
 ring = scene.add_circle(
-    center=CENTER, radius=430, thickness=8, color="#e8e8ff", gap_degrees=gap, angular_velocity=40
+    center=CENTER,
+    radius=430,
+    thickness=8,
+    color="#e8e8ff",
+    gap_degrees=gap,
+    angular_velocity=40,
+    tags={"ring"},
 )
+# The first ball's direction comes from the seed, so seeds differ from frame 0.
+start = scene.rng.uniform(0.0, 2.0 * math.pi)
 scene.add_ball(
     pos=CENTER,
     radius=20,
-    velocity=(speed, 0.0),
+    velocity=(speed * math.cos(start), speed * math.sin(start)),
     color=C.hue_cycle(step=hue_step),
     tags={"ball"},
     constant_speed=True,
@@ -40,6 +48,9 @@ def random_velocity(ctx):  # type: ignore[no-untyped-def]
     angle = ctx.rng.uniform(0.0, 2.0 * math.pi)
     return (speed * math.cos(angle), speed * math.sin(angle))
 
+
+# A soft tick on every ring hit, so even a short sweep is audible.
+scene.on_collision("ball", "ring", [A.play(S.scale("A4", mode="minor_pentatonic", voice="pluck"))])
 
 scene.on_escape(
     ring,

@@ -33,14 +33,18 @@ def load_scene(
     seed: int | None = None,
     duration: float | None = None,
     params: Mapping[str, str] | None = None,
+    *,
+    on_seed: Callable[[int], None] | None = None,
 ) -> Scene:
     """Execute a scene script and return its single module-level ``Scene``.
 
     ``seed`` and ``duration`` (when not ``None``) override the script's own
     values, and ``params`` maps param names to override text for
     ``scene.param``; all are active while the script runs, so anything it derives
-    from them or from ``scene.rng`` follows them. The script runs with ``__name__`` set to
-    ``"__bouncekit_scene__"``, so its ``if __name__ == "__main__"`` block is skipped.
+    from them or from ``scene.rng`` follows them. ``on_seed``, if given, is called with
+    the final seed as soon as the script creates its Scene. The script runs with
+    ``__name__`` set to ``"__bouncekit_scene__"``, so its
+    ``if __name__ == "__main__"`` block is skipped.
 
     Raises:
         SceneLoadError: if the file does not exist or defines zero or several scenes.
@@ -59,11 +63,15 @@ def load_scene(
     scene_module._overrides.update(overrides)
     scene_module._param_overrides.clear()
     scene_module._param_overrides.update(params or {})
+    scene_module._seed_listeners.clear()
+    if on_seed is not None:
+        scene_module._seed_listeners.append(on_seed)
     try:
         namespace = runpy.run_path(str(file), run_name="__bouncekit_scene__")
     finally:
         scene_module._overrides.clear()
         scene_module._param_overrides.clear()
+        scene_module._seed_listeners.clear()
     scenes: list[Scene] = []
     for value in namespace.values():
         if isinstance(value, Scene) and not any(value is s for s in scenes):
@@ -88,7 +96,8 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
         prog="bouncekit", description="Render, preview or batch-render a bouncekit scene script."
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="{render,preview,batch}")
-    scene_kwargs: dict[str, object] = {"type": Path, "help": "scene script (.py)"}
+    # str, not Path: metadata records the script path as given (FR-405).
+    scene_kwargs: dict[str, object] = {"type": str, "help": "scene script (.py)"}
     if scene_optional:
         scene_kwargs["nargs"] = "?"
         scene_kwargs["default"] = None
@@ -132,7 +141,7 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     return parser
 
 
-def _plan_batch(args: argparse.Namespace, script: Path) -> list[Job]:
+def _plan_batch(args: argparse.Namespace, script: str | Path) -> list[Job]:
     """Validate the batch options and plan the jobs; ``ConfigError`` names the option."""
     sets = parse_assignments(args.set, "--set")
     grid = parse_grid(args.grid)
@@ -147,7 +156,7 @@ def _plan_batch(args: argparse.Namespace, script: Path) -> list[Job]:
     )
 
 
-def _run_batch_command(args: argparse.Namespace, script: Path) -> int:
+def _run_batch_command(args: argparse.Namespace, script: str | Path) -> int:
     """``bouncekit batch``: plan, check ffmpeg, run the jobs, report; returns the exit code."""
     try:
         jobs = _plan_batch(args, script)
@@ -170,7 +179,7 @@ def _run_batch_command(args: argparse.Namespace, script: Path) -> int:
                     stream=sys.stdout,
                 )
         else:
-            shown = result.out if result.out is not None else script.stem
+            shown = result.out if result.out is not None else script
             bar.write(f"[{result.index}/{total}] FAILED {shown}: {result.error}",
                       stream=sys.stderr)  # fmt: skip
         finished += 1
@@ -205,7 +214,8 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
     if default_scene is not None and (not args_list or args_list[0].startswith("-")):
         args_list.insert(0, "preview")
     args = _build_parser(default_scene is not None).parse_args(args_list)
-    script: Path | None = args.scene if args.scene is not None else default_scene
+    # The script path as given on the CLI (FR-405); Path only where a file is needed.
+    script: str | Path | None = args.scene if args.scene is not None else default_scene
     assert script is not None  # argparse requires it unless default_scene is given
     if args.command == "batch":
         return _run_batch_command(args, script)
@@ -241,7 +251,7 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
 
     try:
         reload()  # fail fast
-        run_preview(reload, args.scale, watch=script, reload=reload)
+        run_preview(reload, args.scale, watch=Path(script), reload=reload)
     except BouncekitError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return ERROR_EXIT

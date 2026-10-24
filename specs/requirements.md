@@ -378,8 +378,8 @@ Terms: a **param** is a named value a script declares with `scene.param(...)`. A
 
 ### FR-404 Batch execution and failure isolation — [M4]
 - With `--jobs 1` (the default), THE SYSTEM SHALL run jobs one after another in the CLI process, in planned order. With `--jobs N > 1` it SHALL run up to `N` jobs at once in separate worker processes (spawn start method). Each job SHALL load the script afresh with its own seed, duration and overrides (FR-402) and do a CLI render (FR-405).
-- WHEN a job raises any `Exception` (script error, `ConfigError`, `FfmpegError`, unknown param, …) or its worker process dies, THE SYSTEM SHALL record the job as failed with `<ExceptionType>: <message>`, delete that job's MP4 and JSON if they exist, and continue with the remaining jobs.
-- As each job finishes, THE SYSTEM SHALL print `[<i>/<n>] wrote <mp4> (<frames> frames, <seconds> s)` to stdout for a success (omitted with `--quiet`) or `[<i>/<n>] FAILED <mp4>: <error>` to stderr for a failure (always shown). `<i>` is the job's 1-based planned index. After all jobs it SHALL print `batch: <ok> ok, <failed> failed` (always shown).
+- WHEN a job raises any `Exception` (script error, `ConfigError`, `FfmpegError`, unknown param, …) or its worker process dies, THE SYSTEM SHALL record the job as failed with `<ExceptionType>: <message>`, delete that job's MP4 and JSON if they exist, and continue with the remaining jobs. A worker process that dies SHALL fail only its own job (error `worker crashed: …`), stop any ffmpeg it started, and leave every other job to run normally.
+- As each job finishes, THE SYSTEM SHALL print `[<i>/<n>] wrote <mp4> (<frames> frames, <seconds> s)` to stdout for a success (omitted with `--quiet`) or `[<i>/<n>] FAILED <mp4>: <error>` to stderr for a failure (always shown). With `--seeds` omitted the MP4 name is known once the script has created its Scene; a job that fails before that shows the script path as given instead of `<mp4>`. `<i>` is the job's 1-based planned index. After all jobs it SHALL print `batch: <ok> ok, <failed> failed` (always shown).
 - The exit code SHALL be 0 when every job succeeded and 1 when any job failed (2 is reserved for FR-403 errors).
 - Output files and their metadata SHALL be the same, except `render_seconds`, for any `--jobs` value and any completion order (NFR-401).
 
@@ -420,7 +420,7 @@ Terms: a **param** is a named value a script declares with `scene.param(...)`. A
 - WHILE the batch bar is shown, per-job lines (FR-404) SHALL clear the bar line first and redraw it after, so lines never interleave with the bar.
 
 ### FR-409 Example — [M4], [Eng]
-- `examples/param_sweep.py` SHALL declare at least two params with `scene.param` (one numeric that changes the physics, for example ring gap or ball speed, and one that changes the look), add a title with `add_text` that disappears before the end, and add a live counter with a callable `add_text`. It SHALL have sound and render with `bouncekit render`.
+- `examples/param_sweep.py` SHALL declare at least two params with `scene.param` (one numeric that changes the physics, for example ring gap or ball speed, and one that changes the look), add a title with `add_text` that disappears before the end, and add a live counter with a callable `add_text`. It SHALL have sound and render with `bouncekit render`. Its seed SHALL change the output from the first frame, and a 2-second render SHALL contain sound triggers, so a short seeds × grid sweep shows seed variation and is audible.
 - `bouncekit batch examples/param_sweep.py --seeds 1-2 --grid <numeric param>=<two values> --duration <short>` SHALL produce 4 MP4 + 4 JSON files with distinct names and exit 0.
 
 ### Non-functional (M4)

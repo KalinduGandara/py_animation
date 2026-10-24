@@ -941,7 +941,7 @@ flowchart TB
     cli[cli.main: render / preview / batch<br/>parse --set, --grid, --seeds] -->|render| one[run_job in process]
     cli -->|batch: plan_jobs| plan[(jobs: seed x grid product<br/>names checked unique)]
     plan -->|--jobs 1| seq[run_job sequentially]
-    plan -->|--jobs N| pool[ProcessPoolExecutor spawn<br/>run_job per worker]
+    plan -->|--jobs N| pool[spawned Process per job<br/>at most N alive]
     one & seq & pool --> load[load_scene path, seed, duration, params<br/>_overrides + _param_overrides active while script runs]
     load --> scene[Scene: scene.param reads overrides<br/>add_text registers overlays]
     scene --> render[Scene.render out, progress=cb<br/>draw: ... glow, then texts]
@@ -1072,7 +1072,8 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
   On `Exception`, remove `out` and `out.with_suffix(".json")` if they exist (`missing_ok`) and return `ok=False, error=f"{type(exc).__name__}: {exc}"`. `KeyboardInterrupt` propagates. `bouncekit render` is `run_job` with a frame progress bar. Its failure prints `error: …` and exits 2, as in M0.
 - `run_batch`:
   - `workers == 1`: a loop in the current process, calling `on_result` after each job.
-  - `workers > 1`: `ProcessPoolExecutor(max_workers=min(workers, len(jobs)), mp_context=multiprocessing.get_context("spawn"))`. Submit all jobs and handle `as_completed`. A future that raises (`BrokenProcessPool` or a pickling error) becomes `JobResult(ok=False, error="worker crashed: …")`. `Job` and `JobResult` hold only picklable data, and `run_job` is a module-level function.
+  - `workers > 1`: one spawned `Process` per job (`multiprocessing.get_context("spawn")`), at most `workers` alive at once, started in planned order. A pool is not used: one dead worker breaks a `ProcessPoolExecutor` and fails every pending job (review fix, FR-404). Each child runs `_work(job, conn)`: it calls `os.setpgid(0, 0)` (own process group), runs `run_job(job, on_out=...)`, and sends `("out", path)` as soon as the MP4 name is known and then `("result", JobResult)` over a one-way `Pipe`. The parent `multiprocessing.connection.wait`s on the process sentinels and pipe readers. A child that exits without sending a result becomes `JobResult(ok=False, error="worker crashed: worker process exited with code N")`; the parent `killpg`s its group (stopping an orphaned ffmpeg so it cannot finish the file later) and deletes the announced MP4/JSON. A `Process.start` failure (for example pickling) fails that job the same way. On any exit from `run_batch` (including `KeyboardInterrupt`) live workers and their groups are killed. `Job` and `JobResult` hold only picklable data, and `_work` is a module-level function.
+  - Name announcement: `load_scene(..., on_seed=)` registers a listener in `scene._seed_listeners`, which `Scene.__init__` calls with the final seed. `run_job` turns it into the default MP4 path and calls `on_out` once. `JobResult.out` still stays `None` when the script fails to load with the name unresolved (a load failure has no files to remove).
 - The CLI `batch` command:
   1. Parse and plan, exiting 2 on errors.
   2. Call `require_ffmpeg()`, exiting 2 if it is missing.
@@ -1126,8 +1127,8 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 - The duplicate-name check in `plan_jobs` compares `(seed, suffix)` pairs, so it also works when `--seeds` is omitted (seed `None`, resolved after load): jobs then share the script seed and only the suffix can collide. The error names `--grid/--set` and both job indices.
 - A name given with both `--set` and `--grid` is rejected by `plan_jobs` (`ConfigError` naming `--grid`); repeats within `--set` or within `--grid` are rejected by `parse_assignments`/`parse_grid`.
 - `--jobs < 1` and a non-finite or non-positive `--duration` are checked by the CLI before planning (exit 2). A non-integer `--jobs` text is rejected by argparse (`type=int`), which also exits 2.
-- A `FAILED` line for a job whose name was never resolved (the script failed to load with `--seeds` omitted) shows the script stem instead of the MP4 path.
-- `run_batch` with `workers > 1` deletes the planned MP4/JSON of a crashed worker's job when the name is known; when it is not (seed resolved in the worker), no file name is available to clean up.
+- A `FAILED` line for a job whose name was never resolved shows the script path as given instead of the MP4 path. With `--jobs > 1` a crashed worker's name is known as soon as its script created the Scene (announced over the pipe), so this only happens for a failure before `Scene(...)` or, with `--jobs 1`, for any load failure (`JobResult.out` is `None` then; nothing was written).
+- `Job.script` keeps the CLI text (argparse `type=str`), so `"scene"` in the metadata is the path as given (FR-405); `Path(job.script)` is used only for the stem and loading.
 - `--jobs N > 1` always uses the spawn pool, even for one job.
 
 ### M4.8 Progress (FR-408)
@@ -1153,7 +1154,7 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 | Param declaration | `scene.param(name, default)`, typed by the default, overrides parsed at the call | module-level `PARAMS = {...}` dict (needs a convention and a second lookup); argparse inside scripts (each script re-implements the CLI); typed `Param` objects (more API for no gain) |
 | Unknown `--set` names | `ConfigError` after the script ran | silently ignored (typos render the wrong video without notice) |
 | Override transport | module-level `_param_overrides`, like the M0 `_overrides` | environment variables (stringly, leak across jobs); passing into `Scene(...)` (scripts would have to forward it) |
-| Parallelism | `ProcessPoolExecutor` with `spawn`, `--jobs 1` in process by default | threads (GIL-bound pymunk/numpy drawing, and the global `_overrides` is not thread-safe); `fork` (unsafe with SDL/ffmpeg pipes on macOS) |
+| Parallelism | one spawned `Process` per job (at most `--jobs` alive), `--jobs 1` in process by default | `ProcessPoolExecutor` (one dead worker breaks the pool and fails every pending job, FR-404); threads (GIL-bound pymunk/numpy drawing, and the global `_overrides` is not thread-safe); `fork` (unsafe with SDL/ffmpeg pipes on macOS) |
 | File naming | `<stem>_seed<N>_<k>-<v>…` from the CLI text, collisions rejected | hash of the params (unreadable); parsed values (`40` vs `40.0` surprises) |
 | Metadata writer | CLI side (`run_job`), not `Scene.render` | inside `Scene.render` (breaks M1/M2 tests that assert the output directory holds only the MP4; NFR-402) |
 | Text rendering | `pygame.freetype` default font via one `Renderer.text` primitive | `pygame.font` (older API, no float sizes); bundling a TTF (asset and licence work for no M4 need); text as a world object (would enter physics/registry) |

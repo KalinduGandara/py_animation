@@ -367,3 +367,15 @@ def test_readme_covers_m4() -> None:
     for word in ("scene.param", "--set", "bouncekit batch", "--seeds", "--grid", "--jobs",
                  "metadata", ".json", "add_text", "--quiet"):  # fmt: skip
         assert word in text
+
+
+def test_param_sweep_short_sweep_varies_by_seed_and_has_sound(tmp_path: Path) -> None:
+    """FR-409: seeds change a short render from the start, and it is audible (review fix)."""
+    code = main(["batch", str(PARAM_SWEEP), "--seeds", "1-2", "--grid", "gap=30",
+                 "--duration", "2", "--out-dir", str(tmp_path), "--quiet"])  # fmt: skip
+    assert code == 0
+    one = tmp_path / "param_sweep_seed1_gap-30.mp4"
+    two = tmp_path / "param_sweep_seed2_gap-30.mp4"
+    assert one.read_bytes() != two.read_bytes()
+    for mp4 in (one, two):
+        assert json.loads(mp4.with_suffix(".json").read_text())["sound_triggers"] > 0

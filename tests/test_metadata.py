@@ -158,3 +158,19 @@ def test_run_job_failure_removes_existing_outputs(tmp_path: Path) -> None:
     assert result.error is not None and result.error.startswith("ConfigError:")
     assert result.out == out
     assert not out.exists() and not out.with_suffix(".json").exists()
+
+
+def test_metadata_scene_is_script_path_as_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-405: ``"scene"`` is the CLI text, not a normalised path (review fix)."""
+    monkeypatch.chdir(PARAM.parent.parent)
+    given = "./fixtures//param_scene.py"
+    out = tmp_path / "v.mp4"
+    assert cli.main(["render", given, "--duration", "0.1", "--out", str(out), "--quiet"]) == 0
+    assert json.loads(out.with_suffix(".json").read_text())["scene"] == given
+    out_dir = tmp_path / "b"
+    assert cli.main(["batch", given, "--duration", "0.1", "--out-dir", str(out_dir),
+                     "--quiet"]) == 0  # fmt: skip
+    data = json.loads((out_dir / "param_scene_seed5.json").read_text())
+    assert data["scene"] == given

@@ -213,3 +213,39 @@ def test_parallel_matches_sequential(tmp_path: Path, capsys: pytest.CaptureFixtu
     assert out.count("batch: 2 ok, 2 failed") == 2
     assert _outputs(seq) == _outputs(par)
     assert len(_outputs(seq)) == 4
+
+
+# --- worker death (FR-404, review fix) ---------------------------------------------
+
+DYING = FIXTURES / "dying_scene.py"
+
+
+def test_dead_worker_fails_only_its_job(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = cli.main(["batch", str(DYING), "--grid", "mode=die,a,b,c", "--jobs", "2",
+                     "--out-dir", str(tmp_path)])  # fmt: skip
+    out, err = capsys.readouterr()
+    assert code == 1
+    assert "batch: 3 ok, 1 failed" in out
+    for mode in ("a", "b", "c"):
+        assert (tmp_path / f"dying_scene_seed7_mode-{mode}.mp4").is_file()
+        assert (tmp_path / f"dying_scene_seed7_mode-{mode}.json").is_file()
+    assert err.count("FAILED") == 1
+    # The name is known (script seed) although the worker died while loading.
+    assert f"[1/4] FAILED {tmp_path / 'dying_scene_seed7_mode-die.mp4'}: worker crashed" in err
+
+
+def test_dead_worker_partial_outputs_removed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import time
+
+    code = cli.main(["batch", str(DYING), "--grid", "mode=a,die_render", "--jobs", "2",
+                     "--out-dir", str(tmp_path)])  # fmt: skip
+    out, err = capsys.readouterr()
+    assert code == 1
+    assert "batch: 1 ok, 1 failed" in out
+    dead = tmp_path / "dying_scene_seed7_mode-die_render.mp4"
+    assert f"[2/2] FAILED {dead}: worker crashed" in err
+    time.sleep(0.5)  # an orphaned ffmpeg must not finish the file afterwards
+    assert not dead.exists() and not dead.with_suffix(".json").exists()
+    assert (tmp_path / "dying_scene_seed7_mode-a.mp4").is_file()
