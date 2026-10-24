@@ -984,7 +984,8 @@ class Scene:
                 Path(sys.argv[0]), seed=self.config.seed, duration=self.config.duration
             )
 
-        run_preview(make, scale)
+        script = Path(sys.argv[0])
+        run_preview(make, scale, watch=script)
 
     def run(self) -> None:
         """Dispatch to the ``bouncekit`` CLI using ``sys.argv``; call from ``__main__``.

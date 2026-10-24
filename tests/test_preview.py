@@ -1,6 +1,7 @@
 """Tests for the live preview (FR-009), run headless with the dummy SDL driver."""
 
 import os
+from pathlib import Path
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
@@ -8,6 +9,7 @@ import pygame
 import pytest
 
 from bouncekit import Scene
+from bouncekit.cli import load_scene
 from bouncekit.render.preview import Preview, run_preview
 
 
@@ -123,7 +125,9 @@ def test_invalid_scale_rejected() -> None:
 def test_scene_preview_runs_headless(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[Scene] = []
 
-    def fake_run(make: "object", scale: float = 0.45, max_frames: int | None = None) -> Scene:
+    def fake_run(
+        make: "object", scale: float = 0.45, max_frames: int | None = None, **_kw: object
+    ) -> Scene:
         scene = make()  # type: ignore[operator]
         seen.append(scene)
         return scene  # type: ignore[no-any-return]
@@ -151,3 +155,100 @@ def test_paced_at_scene_fps_and_never_skips_steps(preview: "Preview") -> None:
     preview.run(max_frames=5)
     assert clock.ticks == [preview.scene.config.fps] * 5
     assert preview.scene.frame == 5  # one step per displayed frame despite lag
+
+
+# --- T-305: hot-reload (FR-310) ---
+
+SCRIPT = (
+    "from bouncekit import Scene\n"
+    "scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=3, background={bg!r})\n"
+)
+
+
+def write_script(path: Path, text: str, bump: int) -> None:
+    path.write_text(text)
+    st = path.stat()
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + bump * 1_000_000_000))
+
+
+@pytest.fixture
+def watched(tmp_path: Path) -> "tuple[Path, Preview]":
+    file = tmp_path / "scene.py"
+    write_script(file, SCRIPT.format(bg="#101010"), 0)
+    pv = Preview(lambda: load_scene(file), scale=1.0, watch=file)
+    return file, pv
+
+
+def test_reload_replaces_scene_and_prints_reloaded(
+    watched: "tuple[Path, Preview]", capsys: pytest.CaptureFixture[str]
+) -> None:
+    file, pv = watched
+    old = pv.scene
+    pv.scene.step_frame()
+    write_script(file, SCRIPT.format(bg="#ff0000"), 1)
+    pv.poll_reload(now=pv._last_check + 1.0)
+    assert pv.scene is not old
+    assert pv.scene.frame == 0
+    assert pv.scene.config.background != old.config.background
+    assert "reloaded" in capsys.readouterr().out
+    assert "reloaded" in pv._title()
+
+
+def test_poll_within_throttle_does_nothing(watched: "tuple[Path, Preview]") -> None:
+    file, pv = watched
+    old = pv.scene
+    pv.poll_reload(now=pv._last_check + 1.0)
+    write_script(file, SCRIPT.format(bg="#ff0000"), 1)
+    pv.poll_reload(now=pv._last_check + 0.1)
+    assert pv.scene is old
+
+
+def test_unchanged_file_never_reloads(watched: "tuple[Path, Preview]") -> None:
+    _, pv = watched
+    old = pv.scene
+    for i in range(1, 4):
+        pv.poll_reload(now=pv._last_check + 1.0 * i)
+    assert pv.scene is old
+
+
+def test_errors_keep_scene_print_once_and_fix_clears(
+    watched: "tuple[Path, Preview]", capsys: pytest.CaptureFixture[str]
+) -> None:
+    file, pv = watched
+    old = pv.scene
+    write_script(file, "def (:\n", 1)
+    pv.poll_reload(now=pv._last_check + 1.0)
+    pv.poll_reload(now=pv._last_check + 1.0)  # same version: no second message
+    assert pv.scene is old
+    err = capsys.readouterr().err
+    assert err.count("error: SyntaxError") == 1
+    assert "load error" in pv._title()
+
+    write_script(file, SCRIPT.format(bg="#101010").replace("duration=0.5", "duration=-1"), 2)
+    pv.poll_reload(now=pv._last_check + 1.0)
+    assert pv.scene is old
+    assert "error: ConfigError" in capsys.readouterr().err
+
+    write_script(file, SCRIPT.format(bg="#00ff00"), 3)
+    pv.poll_reload(now=pv._last_check + 1.0)
+    assert pv.scene is not old
+    assert pv.error is None
+    assert "load error" not in pv._title()
+
+
+def test_restart_with_broken_file_keeps_scene(watched: "tuple[Path, Preview]") -> None:
+    file, pv = watched
+    old = pv.scene
+    write_script(file, "def (:\n", 1)
+    pv.handle_event(key(pygame.K_r))
+    assert pv.scene is old
+    assert pv.error is not None
+
+
+def test_reload_with_new_canvas_size_rebuilds_window(watched: "tuple[Path, Preview]") -> None:
+    file, pv = watched
+    write_script(file, SCRIPT.format(bg="#101010").replace("width=64", "width=80"), 1)
+    pv.poll_reload(now=pv._last_check + 1.0)
+    assert pv.renderer.surface.get_size()[0] == 80
+    assert pv.screen.get_size()[0] == 80
+    pv.tick()

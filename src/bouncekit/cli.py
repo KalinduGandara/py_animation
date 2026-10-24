@@ -99,9 +99,11 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
             print(f"wrote {written} ({scene.frame} frames)")
         else:
             load_scene(script, seed=args.seed, duration=args.duration)  # fail fast
-            run_preview(
-                lambda: load_scene(script, seed=args.seed, duration=args.duration), args.scale
-            )
+
+            def reload() -> Scene:
+                return load_scene(script, seed=args.seed, duration=args.duration)
+
+            run_preview(reload, args.scale, watch=script, reload=reload)
     except BouncekitError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return ERROR_EXIT

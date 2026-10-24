@@ -118,7 +118,7 @@ def test_render_default_out_uses_script_seed(
 
 def test_preview_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[Callable[[], Scene], float]] = []
-    monkeypatch.setattr(cli, "run_preview", lambda make, scale: calls.append((make, scale)))
+    monkeypatch.setattr(cli, "run_preview", lambda make, scale, **_kw: calls.append((make, scale)))
     code = cli.main(["preview", str(TINY), "--seed", "11", "--duration", "0.3", "--scale", "0.5"])
     assert code == 0
     assert len(calls) == 1
@@ -132,7 +132,7 @@ def test_preview_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_preview_default_scale(monkeypatch: pytest.MonkeyPatch) -> None:
     scales: list[float] = []
-    monkeypatch.setattr(cli, "run_preview", lambda _make, scale: scales.append(scale))
+    monkeypatch.setattr(cli, "run_preview", lambda _make, scale, **_kw: scales.append(scale))
     assert cli.main(["preview", str(TINY)]) == 0
     assert scales == [0.45]
 
@@ -141,7 +141,7 @@ def test_preview_load_error_before_window(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     called: list[bool] = []
-    monkeypatch.setattr(cli, "run_preview", lambda _make, _scale: called.append(True))
+    monkeypatch.setattr(cli, "run_preview", lambda _make, _scale, **_kw: called.append(True))
     assert cli.main(["preview", str(tmp_path / "missing.py")]) == 2
     assert called == []
     assert "error:" in capsys.readouterr().err
@@ -193,7 +193,9 @@ def test_usage_error_exits_nonzero() -> None:
 
 def test_default_scene_without_subcommand_previews(monkeypatch: pytest.MonkeyPatch) -> None:
     seeds: list[int] = []
-    monkeypatch.setattr(cli, "run_preview", lambda make, _scale: seeds.append(make().config.seed))
+    monkeypatch.setattr(
+        cli, "run_preview", lambda make, _scale, **_kw: seeds.append(make().config.seed)
+    )
     assert cli.main(["--seed", "4"], default_scene=TINY) == 0
     assert cli.main([], default_scene=TINY) == 0
     assert seeds == [4, 7]
