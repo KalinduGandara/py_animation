@@ -49,7 +49,7 @@ from bouncekit.render.effects import Effects, TrailBall
 from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.rules.commands import BallSpec, Command, apply
 from bouncekit.rules.engine import SUBJECTS, Rule, RuleEngine, RuleKind
-from bouncekit.sound import Scale
+from bouncekit.sound import Melody, Note, Scale
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -149,7 +149,7 @@ class Scene:
         self._cascade: list[Event] = []  # spawn/destroy events for the next step
         self._triggers: list[NoteTrigger] = []
         # Lookup-only state for the trigger policy (FR-103, FR-106); keys hash by identity.
-        self._cursor: dict[Scale, int] = {}
+        self._cursor: dict[Scale | Melody, int] = {}
         self._last_trigger: dict[tuple[Play, WorldObject | None], int] = {}  # -> step
         self._frame_triggers: dict[int, int] = {}  # event.frame -> notes started
         # Visual-only flash state (FR-210): object index -> (colour, first frame, frames).
@@ -508,6 +508,9 @@ class Scene:
         same subject ``a`` only after ``min_retrigger_interval``; at most
         ``max_triggers_per_frame`` notes start per ``ev.frame`` (later ones dropped in
         dispatch order). Only notes that play advance a ``Scale``'s cursor (FR-103).
+        A ``Melody`` hit plays its next chord: one note per chord note at the same
+        offset, each at the hit's gain times its velocity, counted as one trigger for
+        the per-frame cap and the retrigger interval (FR-307).
         """
         cfg = self.config
         audio = cfg.audio
@@ -527,24 +530,31 @@ class Scene:
         if started >= audio.max_triggers_per_frame:
             return
         src = play.source
-        if isinstance(src, Scale):
+        notes: tuple[tuple[float, float], ...]  # (hz, gain factor)
+        if isinstance(src, Note):
+            notes = ((src.hz, 1.0),)
+        elif isinstance(src, Scale):
             index = self._cursor.get(src, 0)
-            hz = src.hz[index]
             self._cursor[src] = (index + 1) % len(src.hz)
+            notes = ((src.hz[index], 1.0),)
         else:
-            hz = src.hz
+            index = self._cursor.get(src, 0)
+            self._cursor[src] = (index + 1) % len(src.chords)
+            notes = src.chords[index]
         gain = play.gain
         if speed is not None:
             gain *= min(1.0, speed / audio.reference_speed) ** 0.5
-        self._triggers.append(
-            NoteTrigger(
-                step=ev.step,
-                offset=sample_offset(ev.step, cfg.fps, cfg.substeps),
-                voice=src.voice,
-                hz=hz,
-                gain=gain,
+        offset = sample_offset(ev.step, cfg.fps, cfg.substeps)
+        for hz, factor in notes:
+            self._triggers.append(
+                NoteTrigger(
+                    step=ev.step,
+                    offset=offset,
+                    voice=src.voice,
+                    hz=hz,
+                    gain=gain * factor,
+                )
             )
-        )
         self._last_trigger[(play, a)] = ev.step
         self._frame_triggers[ev.frame] = started + 1
 

@@ -1,4 +1,6 @@
-"""Sound sources for collision rules (FR-102, FR-103): ``S.note(...)``, ``S.scale(...)``.
+"""Sound sources for collision rules (FR-102, FR-103, FR-307).
+
+``S.note(...)``, ``S.scale(...)`` and ``S.melody(...)``.
 
 Pitches are note names (``"C5"``, ``"F#4"``, ``"Bb3"``; octave -1..9, A4 = 440 Hz,
 12-tone equal temperament), MIDI numbers (``int`` 0..127) or frequencies in Hz
@@ -6,9 +8,11 @@ Pitches are note names (``"C5"``, ``"F#4"``, ``"Bb3"``; octave -1..9, A4 = 440 H
 """
 
 import math
+import os
 import re
 from dataclasses import dataclass
 
+from bouncekit.audio.midi import read_chords
 from bouncekit.audio.voices import (
     ADSR,
     VOICES,
@@ -25,6 +29,7 @@ __all__ = [
     "ADSR",
     "VOICES",
     "Marimba",
+    "Melody",
     "MODES",
     "Note",
     "Pitch",
@@ -35,6 +40,7 @@ __all__ = [
     "Triangle",
     "Voice",
     "VoiceLike",
+    "melody",
     "note",
     "pitch_to_hz",
     "scale",
@@ -114,7 +120,20 @@ class Scale:
     voice: Voice
 
 
-Source = Note | Scale
+@dataclass(frozen=True, eq=False)
+class Melody:
+    """A chord sequence from a MIDI file: each trigger plays the next chord with ``voice``.
+
+    ``chords`` holds ``(hz, velocity / 127)`` pairs per chord, in ascending pitch.
+    Compared and hashed by identity: every ``melody(...)`` call is a distinct source
+    with its own cursor (one per scene, starting at the first chord).
+    """
+
+    chords: tuple[tuple[tuple[float, float], ...], ...]
+    voice: Voice
+
+
+Source = Note | Scale | Melody
 
 
 def note(pitch: Pitch, *, voice: VoiceLike = "sine") -> Note:
@@ -161,3 +180,42 @@ def scale(
             f"octaves={octaves} reaches {hz[-1]:.2f} Hz"
         )
     return Scale(hz=hz, voice=resolve_voice(voice))
+
+
+def melody(
+    path: str | os.PathLike[str],
+    *,
+    voice: VoiceLike = "sine",
+    track: int | None = None,
+    transpose: int = 0,
+) -> Melody:
+    """Return a source that plays a MIDI file's notes, one chord per trigger (FR-307).
+
+    The file is read now (relative paths resolve against the current directory).
+    Notes are the ``note_on`` messages with velocity > 0 of ``track`` (``None``: all
+    tracks merged), excluding percussion (MIDI channel 10), shifted by
+    ``transpose`` semitones. Notes starting at the same tick form a chord; every
+    note of a chord starts together at the trigger's gain times ``velocity / 127``.
+    A chord counts as one trigger for the trigger policy; after the last chord the
+    melody wraps to the first. MIDI tempo and note durations are ignored: the hits
+    set the rhythm.
+
+    Raises:
+        ConfigError: if the file is missing, unreadable or has no usable notes,
+            ``track`` is not ``None`` or a valid track index, ``transpose`` is not an
+            int, a transposed note is outside 20 Hz..20 kHz, or ``voice`` is unknown.
+    """
+    chords = read_chords(path, track=track, transpose=transpose)
+    out: list[tuple[tuple[float, float], ...]] = []
+    for chord in chords:
+        notes = []
+        for number, velocity in chord:
+            hz = _midi_to_hz(number)
+            if not _MIN_HZ <= hz <= _MAX_HZ:
+                raise ConfigError(
+                    f"melody: notes must be within 20 Hz..20 kHz; MIDI note {number - transpose} "
+                    f"with transpose={transpose} is {hz:.2f} Hz in {os.fspath(path)}"
+                )
+            notes.append((hz, velocity / 127))
+        out.append(tuple(notes))
+    return Melody(chords=tuple(out), voice=resolve_voice(voice))

@@ -28,7 +28,7 @@ from bouncekit.config import (
     _vec,
 )
 from bouncekit.errors import ConfigError
-from bouncekit.sound import Note, Scale, Source
+from bouncekit.sound import Melody, Note, Scale, Source
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -259,14 +259,18 @@ ACTION_TYPES: tuple[type, ...] = (
 
 
 def play(source: Source, *, gain: float = 1.0) -> Play:
-    """Return an action that plays ``source`` (``S.note(...)``/``S.scale(...)``) at ``gain`` (>= 0).
+    """Return an action that plays ``source`` at ``gain`` (>= 0).
+
+    ``source`` is ``S.note(...)``, ``S.scale(...)`` or ``S.melody(...)`` (a melody
+    plays its next chord per trigger, FR-307).
 
     Raises:
         ConfigError: if ``source`` is not a sound source or ``gain`` is negative.
     """
-    if not isinstance(source, Note | Scale):
+    if not isinstance(source, Note | Scale | Melody):
         raise ConfigError(
-            f"source must be a sound source such as S.note(...) or S.scale(...); got {source!r}"
+            "source must be a sound source such as S.note(...), S.scale(...) or "
+            f"S.melody(...); got {source!r}"
         )
     return Play(source=source, gain=_non_negative_number("gain", gain))
 

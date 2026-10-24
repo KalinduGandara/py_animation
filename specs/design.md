@@ -859,6 +859,8 @@ class Effects:
 - `sound.melody` converts to `(pitch_to_hz(note + transpose), velocity / 127)`, range-checked by `pitch_to_hz`.
 - `Scene._trigger`: the policy checks are unchanged (they gate the *hit*); for a `Melody` the scene cursor picks chord `i`, appends one `NoteTrigger` per note (same step/offset, `gain = hit_gain × vel`), then updates `_last_trigger` and `_frame_triggers` once. Cursor dict shared with `Scale` (`self._cursor`, identity-keyed).
 - `mido` is added with `uv add mido`; mypy override `ignore_missing_imports` for `mido` if it lacks `py.typed`.
+- Implemented (T-303): `read_chords` applies `transpose` to the note numbers; `sound.melody` converts with the 12-TET formula and range-checks in Hz itself (so a note pushed past MIDI 127 reports the 20 Hz..20 kHz error naming `transpose`, not a MIDI-range error). `track`/`transpose` type checks happen before the file is read. Besides the listed exceptions, `KeyError`/`IndexError`/`TypeError` from a malformed file also map to `ConfigError`. mido 1.3.3 ships no `py.typed`, so the mypy override is in place.
+- `scripts/make_assets.py [OUT_DIR]` (default: the repo's `assets/`): `make_midi(out_dir)` writes a type-1 file (meta track with 4/4 and 120 bpm, melody track ch 0 at velocity 96, bass track ch 1 at velocity 72, one whole-bar bass note per bar, 480 ticks/beat), 16 bars / 62 melody notes; bar starts are the only 2-note chords. T-304 adds the sample part to `main`.
 
 ### M3.7 Sample voice and pan (FR-308, FR-309)
 
