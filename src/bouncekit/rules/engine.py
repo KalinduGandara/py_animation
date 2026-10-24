@@ -8,7 +8,18 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from bouncekit.actions import Destroy, EndAfter, Handler, Play, Spawn, Split
+from bouncekit.actions import (
+    Destroy,
+    EndAfter,
+    Flash,
+    Handler,
+    Play,
+    Recolor,
+    Resize,
+    SetVelocity,
+    Spawn,
+    Split,
+)
 from bouncekit.events import Event, WorldObject
 from bouncekit.rules.context import ActionContext
 from bouncekit.sound import Source
@@ -241,7 +252,9 @@ class RuleEngine:
             if gated:
                 continue
             fired = True
-            if isinstance(handler, Destroy | Split | Spawn | EndAfter):
+            if isinstance(
+                handler, Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter
+            ):
                 handler.run(ctx)
             elif rule.kind in ("collision", "escape"):
                 handler(ctx, a, b, ev)

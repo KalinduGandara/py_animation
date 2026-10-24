@@ -1,4 +1,6 @@
-"""Built-in rule actions (FR-104, FR-206, FR-207, FR-209): play, destroy, split, spawn, end_after.
+"""Built-in rule actions (FR-104, FR-206..FR-210).
+
+play, destroy, split, spawn, recolor, resize, set_velocity, flash and end_after.
 
 Actions are immutable values compared by identity. When a rule fires, each action's
 ``run(ctx)`` resolves its target and calls the matching :class:`ActionContext`
@@ -34,14 +36,22 @@ __all__ = [
     "Action",
     "Destroy",
     "EndAfter",
+    "Flash",
     "Handler",
     "Play",
+    "Recolor",
+    "Resize",
+    "SetVelocity",
     "Spawn",
     "Split",
     "Target",
     "destroy",
     "end_after",
+    "flash",
     "play",
+    "recolor",
+    "resize",
+    "set_velocity",
     "spawn",
     "split",
 ]
@@ -121,6 +131,7 @@ class Spawn:
     tags: frozenset[str] = frozenset({"ball"})
     elasticity: float = 1.0
     max_total: int | None = None
+    constant_speed: bool = False
 
     def run(self, ctx: "ActionContext") -> None:
         """Evaluate the values now (in ball order) and queue the new balls."""
@@ -138,13 +149,86 @@ class EndAfter:
         ctx.end_after(self.seconds)
 
 
-type Action = Play | Destroy | Split | Spawn | EndAfter
+@dataclass(frozen=True, eq=False)
+class Recolor:
+    """Set the target's base colour after dispatch (see :func:`recolor`)."""
+
+    color: Value[Color]
+    target: Target = "a"
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Evaluate the colour now and queue the change (no-op if the subject is missing)."""
+        obj = ctx._resolve(self.target)
+        if obj is not None:
+            ctx.recolor(obj, ctx._eval(self.color))  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True, eq=False)
+class Resize:
+    """Change the target ball's radius after dispatch (see :func:`resize`)."""
+
+    radius: float | None = None
+    scale: float | None = None
+    target: Target = "a"
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Queue the resize (no-op if the subject is missing or is not a ball)."""
+        obj = ctx._resolve(self.target)
+        if isinstance(obj, Ball):
+            ctx._resize_action(obj, self.radius, self.scale)
+
+
+@dataclass(frozen=True, eq=False)
+class SetVelocity:
+    """Set or rescale the target ball's velocity after dispatch (see :func:`set_velocity`)."""
+
+    velocity: Value[Vec] | None = None
+    speed: float | None = None
+    target: Target = "a"
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Evaluate the velocity now and queue the change (no-op unless the subject is a ball)."""
+        obj = ctx._resolve(self.target)
+        if not isinstance(obj, Ball):
+            return
+        if self.velocity is None:
+            ctx._velocity_action(obj, None, self.speed)
+        else:
+            ctx.set_velocity(obj, ctx._eval(self.velocity))  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True, eq=False)
+class Flash:
+    """Briefly draw the target in another colour (see :func:`flash`); visual only."""
+
+    target: Target = "a"
+    seconds: float = 0.08
+    color: Color = (255, 255, 255)
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Queue the flash (no-op if the subject is missing)."""
+        obj = ctx._resolve(self.target)
+        if obj is not None:
+            ctx.flash(obj, seconds=self.seconds, color=self.color)
+
+
+type Action = Play | Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter
 """Any built-in action."""
 
 type Handler = Action | Callable[..., object]
 """A rule handler: a built-in action or a Python callable (see ``Scene.on_collision``)."""
 
-ACTION_TYPES: tuple[type, ...] = (Play, Destroy, Split, Spawn, EndAfter)
+ACTION_TYPES: tuple[type, ...] = (
+    Play,
+    Destroy,
+    Split,
+    Spawn,
+    Recolor,
+    Resize,
+    SetVelocity,
+    Flash,
+    EndAfter,
+)
 
 
 def play(source: Source, *, gain: float = 1.0) -> Play:
@@ -239,6 +323,7 @@ def spawn(
     color: Value[ColorLike] = "#ffffff",
     tags: Iterable[str] = ("ball",),
     elasticity: float = 1.0,
+    constant_speed: bool = False,
     max_total: int | None = None,
 ) -> Spawn:
     """Return an action that adds ``count`` balls of ``radius`` (FR-207).
@@ -253,12 +338,19 @@ def spawn(
     exceed ``config.max_balls`` or ``max_total``, or when ``radius`` could tunnel
     through a live ring.
 
+    With ``constant_speed=True`` each ball keeps its initial speed (FR-212, see
+    ``Scene.add_ball``); that speed must be > 0 and <= ``config.max_speed``.
+
     Raises:
         ConfigError: for an invalid value (a callable's result is checked when it
-            is evaluated), a non-positive ``radius`` or ``count``, or a bad
-            ``max_total``.
+            is evaluated), a non-positive ``radius`` or ``count``, a bad
+            ``max_total``, or ``constant_speed`` with a zero speed (a speed above
+            ``max_speed`` raises when the rule runs).
     """
     _positive_int("count", count)
+    _bool("constant_speed", constant_speed)
+    if constant_speed and not callable(velocity) and _vec("velocity", velocity) == (0.0, 0.0):
+        raise ConfigError("constant_speed needs a non-zero velocity; got (0, 0)")
     return Spawn(
         pos=_value("pos", pos, _vec),
         radius=_positive_number("radius", radius),
@@ -268,6 +360,96 @@ def spawn(
         tags=_tags(tags),
         elasticity=_non_negative_number("elasticity", elasticity),
         max_total=_max_total(max_total),
+        constant_speed=constant_speed,
+    )
+
+
+def _bool(name: str, value: object) -> bool:
+    if type(value) is not bool:
+        raise ConfigError(f"{name} must be True or False; got {value!r}")
+    return value
+
+
+def recolor(color: Value[ColorLike], *, target: Target = "a") -> Recolor:
+    """Return an action that sets the target's base colour (FR-210).
+
+    ``color`` is a colour value or a callable ``f(ctx)`` evaluated when the rule
+    runs. Works on balls and rings.
+
+    Raises:
+        ConfigError: if ``color`` is not a colour or callable, or ``target`` is invalid.
+    """
+    return Recolor(color=_value("color", color, _color), target=_target(target))
+
+
+def _exactly_one(names: str, a: object, b: object) -> None:
+    if (a is None) == (b is None):
+        raise ConfigError(f"give exactly one of {names}; got {a!r} and {b!r}")
+
+
+def resize(
+    *, radius: float | None = None, scale: float | None = None, target: Target = "a"
+) -> Resize:
+    """Return an action that changes the target ball's radius (FR-210).
+
+    Give exactly one of ``radius`` (new radius in px) or ``scale`` (factor applied to
+    the radius when the command is applied). Mass (pi r^2) and moment follow. The
+    resize is refused (no change, no error) when the new radius could tunnel
+    through a live ring; a ring target is a no-op.
+
+    Raises:
+        ConfigError: unless exactly one of ``radius``/``scale`` is a positive finite
+            number, or if ``target`` is invalid.
+    """
+    _exactly_one("radius, scale", radius, scale)
+    return Resize(
+        radius=None if radius is None else _positive_number("radius", radius),
+        scale=None if scale is None else _positive_number("scale", scale),
+        target=_target(target),
+    )
+
+
+def set_velocity(
+    *,
+    velocity: Value[Vec] | None = None,
+    speed: float | None = None,
+    target: Target = "a",
+) -> SetVelocity:
+    """Return an action that sets the target ball's velocity (FR-210).
+
+    Give exactly one of ``velocity`` (px/s, a value or a callable ``f(ctx)``
+    evaluated when the rule runs) or ``speed`` (rescale the current velocity to this
+    speed, keeping its direction; a resting ball stays at rest). The result is
+    clamped to ``config.max_speed``, and a constant-speed ball's ``target_speed``
+    becomes the new speed. A ring target is a no-op.
+
+    Raises:
+        ConfigError: unless exactly one of ``velocity``/``speed`` is given and valid
+            (``speed`` finite and >= 0), or if ``target`` is invalid.
+    """
+    _exactly_one("velocity, speed", velocity, speed)
+    return SetVelocity(
+        velocity=None if velocity is None else _value("velocity", velocity, _vec),
+        speed=None if speed is None else _non_negative_number("speed", speed),
+        target=_target(target),
+    )
+
+
+def flash(target: Target = "a", *, seconds: float = 0.08, color: ColorLike = "#ffffff") -> Flash:
+    """Return an action that flashes the target (ball or ring); visual only (FR-210).
+
+    For ``max(1, round(seconds * fps))`` frames from the next drawn frame, the target
+    is drawn in a colour blended linearly from ``color`` back to its base colour.
+    Physics is unaffected. A new flash on the same object replaces the old one.
+
+    Raises:
+        ConfigError: if ``target`` is invalid, ``seconds`` is negative or not finite,
+            or ``color`` is not a colour.
+    """
+    return Flash(
+        target=_target(target),
+        seconds=_non_negative_number("seconds", seconds),
+        color=parse_color(color),
     )
 
 

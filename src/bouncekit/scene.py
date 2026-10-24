@@ -20,13 +20,14 @@ from bouncekit.audio.mixer import (
     num_samples,
     sample_offset,
 )
-from bouncekit.colors import ColorLike
+from bouncekit.colors import Color, ColorLike
 from bouncekit.config import (
     AudioConfig,
     SceneConfig,
     Vec,
     _non_negative_number,
     _positive_number,
+    _vec,
 )
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
@@ -47,6 +48,11 @@ __all__ = ["Scene", "WorldObject"]
 _overrides: dict[str, object] = {}
 
 F = TypeVar("F", bound=Callable[..., object])
+
+SPATIAL_HASH_BALLS = 100
+"""Live ball count at which the space switches to pymunk's spatial hash (FR-212, C14)."""
+SPATIAL_HASH_COUNT = 10_000
+"""``count`` passed to ``space.use_spatial_hash`` (FR-212, C14)."""
 
 
 class Scene:
@@ -125,6 +131,9 @@ class Scene:
         self._cursor: dict[Scale, int] = {}
         self._last_trigger: dict[tuple[Play, WorldObject | None], int] = {}  # -> step
         self._frame_triggers: dict[int, int] = {}  # event.frame -> notes started
+        # Visual-only flash state (FR-210): object index -> (colour, first frame, frames).
+        self._flash: dict[int, tuple[Color, int, int]] = {}
+        self._hashed = False  # switched to the spatial hash (FR-212)
         self._recorder = EventRecorder(self._rate)
         self._recorder.install(self.space)
 
@@ -568,6 +577,9 @@ class Scene:
             tags=spec.tags,
         )
         ball.generation = generation
+        if spec.constant_speed:
+            ball.constant_speed = True
+            ball.target_speed = math.hypot(*ball.velocity)
         self._register_object(ball, [ball.shape])
         self._balls.append(ball)
         ev = Event(
@@ -651,14 +663,25 @@ class Scene:
         elasticity: float = 1.0,
         color: ColorLike = "#ffffff",
         tags: Iterable[str] = (),
+        constant_speed: bool = False,
     ) -> Ball:
         """Add a dynamic ball; its speed is clamped to ``config.max_speed``.
 
+        With ``constant_speed=True``, after every step (after the clamp) the velocity
+        is rescaled to the initial speed ``|velocity|`` (``ball.target_speed``),
+        keeping its direction; a zero velocity stays zero (FR-212).
+
         Raises:
             ConfigError: if any option is invalid, the scene already has
-                ``config.max_balls`` live balls, or a ball at ``max_speed`` could pass
-                through a ring in one step (see ``_check_tunnelling``).
+                ``config.max_balls`` live balls, a ball at ``max_speed`` could pass
+                through a ring in one step (see ``_check_tunnelling``), or
+                ``constant_speed`` is set with an initial speed of 0 or above
+                ``max_speed``.
         """
+        if type(constant_speed) is not bool:
+            raise ConfigError(f"constant_speed must be True or False; got {constant_speed!r}")
+        if constant_speed:
+            self._check_constant_speed(_vec("velocity", velocity))
         if len(self._balls) >= self.config.max_balls:
             raise ConfigError(
                 f"max_balls is {self.config.max_balls}; cannot add another ball "
@@ -675,9 +698,21 @@ class Scene:
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
+        if constant_speed:
+            ball.constant_speed = True
+            ball.target_speed = math.hypot(*ball.velocity)
         self._register_object(ball, [ball.shape])
         self._balls.append(ball)
         return ball
+
+    def _check_constant_speed(self, velocity: Vec) -> None:
+        """Reject a constant-speed initial velocity of speed 0 or above ``max_speed``."""
+        speed = math.hypot(*velocity)
+        if not 0 < speed <= self.config.max_speed:
+            raise ConfigError(
+                f"constant_speed needs an initial speed in (0, max_speed={self.config.max_speed}]; "
+                f"got velocity {velocity!r} (speed {speed:g})"
+            )
 
     def _check_tunnelling(self, ball: Ball, ring: CircleBoundary) -> None:
         """Reject a ball/ring pair that a ball at ``max_speed`` could pass through.
@@ -725,6 +760,8 @@ class Scene:
                 # integration, so a clamp inside velocity_func would miss them.
                 for ball in self._balls:
                     ball.clamp_speed(max_speed)
+                    if ball.constant_speed:
+                        ball.renormalize()
                 escapes = engine.escapes(step, frame)
                 self._events.extend(escapes)
                 timers = engine.due_timers(step, frame)
@@ -737,19 +774,35 @@ class Scene:
                     engine.run(rule, ev)
                 if self._queue:
                     self._apply_commands()
+                if not self._hashed and len(self._balls) >= SPATIAL_HASH_BALLS:
+                    self._use_spatial_hash()
         finally:
             self._in_frame = False
         self.frame += 1
         engine.conditions(self._step, frame)
 
+    def _use_spatial_hash(self) -> None:
+        """Switch the space to pymunk's spatial hash, once (FR-212, C14)."""
+        self._hashed = True
+        dim = 2 * max(ball.radius for ball in self._balls)
+        self.space.use_spatial_hash(dim, SPATIAL_HASH_COUNT)
+
     def draw(self, renderer: Renderer) -> None:
         """Draw the background and every live object, in insertion order.
 
-        Drawing only reads world state; it never changes the simulation.
+        An object flashing at the current frame (``A.flash``) is drawn in its flash
+        colour blended linearly back to its base colour. Drawing only reads world
+        state; it never changes the simulation.
         """
         renderer.clear(self.config.background)
+        flashes = self._flash
         for obj in self._objects:
-            obj.draw(renderer)
+            color: Color | None = None
+            if flashes:
+                state = flashes.get(self._indices[obj])
+                if state is not None:
+                    color = _flash_color(state, obj.color, self.frame)
+            obj.draw(renderer, color)
 
     def frames(self) -> Iterator[bytes]:
         """Yield each remaining frame as RGB24 bytes, then advance one frame.
@@ -836,3 +889,14 @@ class Scene:
 def _check_tag(name: str, tag: object) -> None:
     if not isinstance(tag, str) or not tag:
         raise ConfigError(f"{name} must be a non-empty string; got {tag!r}")
+
+
+def _flash_color(state: tuple[Color, int, int], base: Color, frame: int) -> Color | None:
+    """The flash colour of ``state`` at ``frame``, or ``None`` outside the flash."""
+    color, start, frames = state
+    k = frame - start
+    if not 0 <= k < frames:
+        return None
+    t = k / frames
+    r, g, b = (round(f + (c - f) * t) for f, c in zip(color, base, strict=True))
+    return (r, g, b)

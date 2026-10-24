@@ -4,12 +4,35 @@ import random
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
-from bouncekit.actions import Play, Spawn, Split, Target, Value, end_after, play, spawn, split
+from bouncekit.actions import (
+    Play,
+    Spawn,
+    Split,
+    Target,
+    Value,
+    end_after,
+    flash,
+    play,
+    resize,
+    set_velocity,
+    spawn,
+    split,
+)
 from bouncekit.colors import ColorLike, parse_color
 from bouncekit.config import Vec, _vec
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, WorldObject
-from bouncekit.rules.commands import BallSpec, DestroyCmd, EndCmd, SpawnCmd, SplitCmd
+from bouncekit.rules.commands import (
+    BallSpec,
+    DestroyCmd,
+    EndCmd,
+    FlashCmd,
+    RecolorCmd,
+    ResizeCmd,
+    SpawnCmd,
+    SplitCmd,
+    VelocityCmd,
+)
 from bouncekit.sound import Source
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -23,10 +46,11 @@ __all__ = ["ActionContext"]
 class ActionContext:
     """Passed to every handler as ``ctx``; one per (event, rule).
 
-    Methods that change the world (``destroy``, ``split``, ``spawn``, ``end_after``) only queue a
-    command: the change is applied after the step's dispatch, never while handlers
-    run. ``play`` produces a note trigger immediately (audio only). Bad arguments
-    raise ``ConfigError`` at the call.
+    Methods that change the world (``destroy``, ``split``, ``spawn``, ``recolor``,
+    ``resize``, ``set_velocity``, ``flash``, ``end_after``) only queue a command: the
+    change is applied after the step's dispatch, never while handlers run. ``play``
+    produces a note trigger immediately (audio only). Bad arguments raise
+    ``ConfigError`` at the call.
 
     Attributes:
         scene: the scene being simulated.
@@ -109,6 +133,7 @@ class ActionContext:
         color: Value[ColorLike] = "#ffffff",
         tags: Iterable[str] = ("ball",),
         elasticity: float = 1.0,
+        constant_speed: bool = False,
         max_total: int | None = None,
     ) -> None:
         """Queue ``count`` new balls; options and refusal rules as ``A.spawn`` (FR-207).
@@ -116,7 +141,8 @@ class ActionContext:
         Callable ``pos``/``velocity``/``color`` are evaluated now, per ball, in ball order.
 
         Raises:
-            ConfigError: for bad options or a callable returning an invalid value.
+            ConfigError: for bad options or a callable returning an invalid value
+                (with ``constant_speed``, also a speed of 0 or above ``max_speed``).
         """
         self._spawn_action(
             spawn(
@@ -127,6 +153,7 @@ class ActionContext:
                 color=color,
                 tags=tags,
                 elasticity=elasticity,
+                constant_speed=constant_speed,
                 max_total=max_total,
             )
         )
@@ -138,10 +165,18 @@ class ActionContext:
             x, y = _vec("pos", self._eval(action.pos))
             velocity = _vec("velocity", self._eval(action.velocity))
             color = parse_color(self._eval(action.color))  # type: ignore[arg-type]
+            if action.constant_speed:
+                self.scene._check_constant_speed(velocity)
             offset = (i - (action.count - 1) / 2) * step
             specs.append(
                 BallSpec(
-                    (x + offset, y), action.radius, velocity, color, action.tags, action.elasticity
+                    (x + offset, y),
+                    action.radius,
+                    velocity,
+                    color,
+                    action.tags,
+                    action.elasticity,
+                    action.constant_speed,
                 )
             )
         self.scene._queue.append(SpawnCmd(tuple(specs), action.max_total))
@@ -151,6 +186,64 @@ class ActionContext:
             fn: Callable[[ActionContext], object] = value
             return fn(self)
         return value
+
+    def recolor(self, obj: WorldObject, color: ColorLike) -> None:
+        """Queue setting the base colour of ``obj`` (a ball or ring) (FR-210).
+
+        Raises:
+            ConfigError: if ``obj`` is not a ball or ring handle or ``color`` is invalid.
+        """
+        _check_object("obj", obj)
+        self.scene._queue.append(RecolorCmd(obj, parse_color(color)))
+
+    def resize(self, ball: Ball, radius: float) -> None:
+        """Queue changing ``ball``'s radius; refusal rules as ``A.resize`` (FR-210).
+
+        A ring is accepted and ignored (no-op).
+
+        Raises:
+            ConfigError: if ``radius`` is not positive and finite, or ``ball`` is not a
+                ball or ring handle.
+        """
+        action = resize(radius=radius)
+        _check_object("ball", ball)
+        if isinstance(ball, Ball):
+            self._resize_action(ball, action.radius, None)
+
+    def _resize_action(self, ball: Ball, radius: float | None, scale: float | None) -> None:
+        self.scene._queue.append(ResizeCmd(ball, radius, scale))
+
+    def set_velocity(self, ball: Ball, velocity: Vec) -> None:
+        """Queue setting ``ball``'s velocity, clamped to ``max_speed`` (FR-210).
+
+        A constant-speed ball's ``target_speed`` becomes the new speed. A ring is
+        accepted and ignored (no-op).
+
+        Raises:
+            ConfigError: if ``velocity`` is not two finite numbers, or ``ball`` is not a
+                ball or ring handle.
+        """
+        value = _vec("velocity", velocity)
+        set_velocity(velocity=value)
+        _check_object("ball", ball)
+        if isinstance(ball, Ball):
+            self._velocity_action(ball, value, None)
+
+    def _velocity_action(self, ball: Ball, velocity: Vec | None, speed: float | None) -> None:
+        self.scene._queue.append(VelocityCmd(ball, velocity, speed))
+
+    def flash(
+        self, obj: WorldObject, *, seconds: float = 0.08, color: ColorLike = "#ffffff"
+    ) -> None:
+        """Queue a flash of ``obj`` (a ball or ring); visual only, as ``A.flash`` (FR-210).
+
+        Raises:
+            ConfigError: if ``obj`` is not a ball or ring handle, ``seconds`` is
+                negative or not finite, or ``color`` is invalid.
+        """
+        action = flash(obj, seconds=seconds, color=color)
+        frames = max(1, round(action.seconds * self.scene.config.fps))
+        self.scene._queue.append(FlashCmd(obj, action.color, frames))
 
     def play(self, source: Source, *, gain: float = 1.0) -> None:
         """Trigger ``source`` now, subject to the audio trigger policy (FR-106, FR-211).
@@ -180,3 +273,8 @@ class ActionContext:
         action = end_after(seconds)
         frames = round(action.seconds * self.scene.config.fps)
         self.scene._queue.append(EndCmd(frames))
+
+
+def _check_object(name: str, obj: object) -> None:
+    if not isinstance(obj, Ball | CircleBoundary):
+        raise ConfigError(f"{name} must be a ball or ring handle; got {obj!r}")

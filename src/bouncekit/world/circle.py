@@ -121,16 +121,22 @@ class CircleBoundary:
 
     @property
     def color(self) -> Color:
-        """Line colour as an RGB tuple."""
+        """Line colour as an RGB tuple (settable; accepts any colour value)."""
         return self._color
+
+    @color.setter
+    def color(self, value: ColorLike) -> None:
+        self._color = parse_color(value)
 
     @property
     def tags(self) -> frozenset[str]:
         """Tags given at creation."""
         return self._tags
 
-    def draw(self, renderer: Renderer) -> None:
-        """Draw the ring as a smooth arc at the current rotation (reads state only).
+    def draw(self, renderer: Renderer, color: Color | None = None) -> None:
+        """Draw the ring as a smooth arc at the current rotation in ``color`` (default: its colour).
+
+        Reads state only.
 
         The arc spans the present segments' end points, so the drawn gap matches the
         physics gap (the chord polygon is within a fraction of a pixel of the arc).
@@ -146,4 +152,5 @@ class CircleBoundary:
             end = rotation + math.degrees(math.atan2(last.y, last.x)) % 360
             if end <= start:
                 end += 360.0
-        renderer.arc(self.center, self._radius, self._thickness, start, end, self._color)
+        drawn = self._color if color is None else color
+        renderer.arc(self.center, self._radius, self._thickness, start, end, drawn)

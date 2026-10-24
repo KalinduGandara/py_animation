@@ -1,10 +1,10 @@
-"""Queued world changes, applied in FIFO order after dispatch (FR-203, FR-205..FR-207).
+"""Queued world changes, applied in FIFO order after dispatch (FR-203, FR-205..FR-210).
 
 Handlers never touch the physics space; they append commands to the scene's
 queue. ``apply`` runs them in the window after dispatch and before the next
 ``space.step``. A command whose target is no longer alive is skipped silently.
-Split and spawn commands that would exceed the ball cap or let a ball tunnel
-through a ring are refused as a whole, without an error (C8).
+Split, spawn and resize commands that would exceed the ball cap or let a ball
+tunnel through a ring are refused as a whole, without an error (C8).
 """
 
 import math
@@ -19,7 +19,19 @@ from bouncekit.world.circle import CircleBoundary
 if TYPE_CHECKING:
     from bouncekit.scene import Scene
 
-__all__ = ["BallSpec", "Command", "DestroyCmd", "EndCmd", "SpawnCmd", "SplitCmd", "apply"]
+__all__ = [
+    "BallSpec",
+    "Command",
+    "DestroyCmd",
+    "EndCmd",
+    "FlashCmd",
+    "RecolorCmd",
+    "ResizeCmd",
+    "SpawnCmd",
+    "SplitCmd",
+    "VelocityCmd",
+    "apply",
+]
 
 
 @dataclass(frozen=True, eq=False)
@@ -50,6 +62,7 @@ class BallSpec:
     color: Color
     tags: frozenset[str]
     elasticity: float
+    constant_speed: bool = False
 
 
 @dataclass(frozen=True, eq=False)
@@ -67,7 +80,44 @@ class EndCmd:
     frames: int
 
 
-type Command = DestroyCmd | SplitCmd | SpawnCmd | EndCmd
+@dataclass(frozen=True, eq=False)
+class RecolorCmd:
+    """Set ``obj``'s base colour."""
+
+    obj: Ball | CircleBoundary
+    color: Color
+
+
+@dataclass(frozen=True, eq=False)
+class ResizeCmd:
+    """Set ``ball``'s radius to ``radius``, or to its radius at apply time times ``scale``."""
+
+    ball: Ball
+    radius: float | None
+    scale: float | None
+
+
+@dataclass(frozen=True, eq=False)
+class VelocityCmd:
+    """Set ``ball``'s velocity, or rescale it to ``speed`` keeping its direction at apply time."""
+
+    ball: Ball
+    velocity: Vec | None
+    speed: float | None
+
+
+@dataclass(frozen=True, eq=False)
+class FlashCmd:
+    """Draw ``obj`` blended from ``color`` back to its base colour over ``frames`` frames."""
+
+    obj: Ball | CircleBoundary
+    color: Color
+    frames: int
+
+
+type Command = (
+    DestroyCmd | SplitCmd | SpawnCmd | EndCmd | RecolorCmd | ResizeCmd | VelocityCmd | FlashCmd
+)
 
 
 def apply(scene: "Scene", cmd: Command) -> None:
@@ -79,6 +129,17 @@ def apply(scene: "Scene", cmd: Command) -> None:
         _split(scene, cmd)
     elif isinstance(cmd, EndCmd):
         scene.total_frames = min(scene.total_frames, scene._frames_done + cmd.frames)
+    elif isinstance(cmd, RecolorCmd):
+        if cmd.obj.alive:
+            cmd.obj.color = cmd.color
+    elif isinstance(cmd, ResizeCmd):
+        _resize(scene, cmd)
+    elif isinstance(cmd, VelocityCmd):
+        _set_velocity(scene, cmd)
+    elif isinstance(cmd, FlashCmd):
+        if cmd.obj.alive:
+            # Starts at the next drawn frame: the frame count once the current frame completes.
+            scene._flash[scene._indices[cmd.obj]] = (cmd.color, scene._frames_done, cmd.frames)
     else:
         _spawn(scene, cmd)
 
@@ -99,7 +160,7 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
     if not _allowed(scene, cmd.into - 1, cmd.max_total, r2):
         return
     vx, vy = parent.velocity
-    speed = math.hypot(vx, vy)
+    speed = parent.target_speed if parent.constant_speed else math.hypot(vx, vy)
     theta = math.atan2(vy, vx) if speed > 0 else 0.0
     spread = math.radians(cmd.spread_degrees)
     px, py = parent.position
@@ -114,7 +175,9 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
     parent.position, parent.velocity = states[0]
     parent.generation += 1
     for pos, vel in states[1:]:
-        spec = BallSpec(pos, r2, vel, parent.color, parent.tags, parent.shape.elasticity)
+        spec = BallSpec(
+            pos, r2, vel, parent.color, parent.tags, parent.shape.elasticity, parent.constant_speed
+        )
         child = scene._spawn_ball(spec, generation=parent.generation)
         scene._inherit(parent, child)
 
@@ -124,3 +187,33 @@ def _spawn(scene: "Scene", cmd: SpawnCmd) -> None:
         return
     for spec in cmd.balls:
         scene._spawn_ball(spec, generation=0)
+
+
+def _resize(scene: "Scene", cmd: ResizeCmd) -> None:
+    ball = cmd.ball
+    if not ball.alive:
+        return
+    radius = cmd.radius if cmd.scale is None else ball.radius * cmd.scale
+    if radius is None or not math.isfinite(radius) or radius <= 0:
+        return
+    if any(scene._tunnels(radius, ring) for ring in scene._rings):
+        return
+    ball.set_radius(radius)
+
+
+def _set_velocity(scene: "Scene", cmd: VelocityCmd) -> None:
+    ball = cmd.ball
+    if not ball.alive:
+        return
+    if cmd.velocity is not None:
+        ball.velocity = cmd.velocity
+    elif cmd.speed is not None:
+        vx, vy = ball.velocity
+        speed = math.hypot(vx, vy)
+        if speed > 0:
+            # min() first so a huge speed cannot overflow the product.
+            scale = min(cmd.speed, scene.config.max_speed) / speed
+            ball.velocity = (vx * scale, vy * scale)
+    ball.clamp_speed(scene.config.max_speed)
+    if ball.constant_speed:
+        ball.target_speed = math.hypot(*ball.velocity)

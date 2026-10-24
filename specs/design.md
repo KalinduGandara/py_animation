@@ -589,7 +589,7 @@ Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.co
 
 ### M2.5a Implementation notes (T-202)
 
-- `A.spawn`/`ctx.spawn` do not take `constant_speed` yet: constant speed (FR-212) arrives with T-204, which adds the option to `spawn`, `add_ball` and the split inheritance (the split speed `s` is `|v|` until then). Avoids a parameter that silently does nothing.
+- (Superseded by T-204, §M2.5c.) `A.spawn`/`ctx.spawn` did not take `constant_speed` before T-204: constant speed (FR-212) arrives with T-204, which adds the option to `spawn`, `add_ball` and the split inheritance (the split speed `s` is `|v|` until then). Avoids a parameter that silently does nothing.
 - `ctx.split(ring)` is accepted and ignored (FR-206 no-op), matching `A.split` on a ring subject; any other non-handle raises `ConfigError`.
 - Spawned balls are not speed-clamped at creation (as `add_ball`); the post-step clamp applies from the next step. The spawn event's `speed` is the ball's speed as created.
 - Callable results are validated when evaluated (`ConfigError` naming `pos`/`velocity`/`color`, raised in the handler that called `spawn`); all callables run before the cap/tunnelling check, so a refused spawn still consumes the same `rng` values (deterministic).
@@ -604,6 +604,16 @@ Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.co
 - `F` of FR-209 is `Scene._frames_done`: `frame + 1` while `step_frame` runs a frame's steps, `frame` afterwards (when rules, or commands applied outside a frame). `EndCmd` stores `round(seconds × fps)` frames, computed when queued.
 - Subject validation error names the rule kind and the registration method, e.g. `... which a timer rule (every) does not have`.
 - `scene.when(predicate)` rejects built-in actions as the predicate as well as non-callables.
+
+### M2.5c Implementation notes (T-204)
+
+- `A.resize(scale=)` and `A.set_velocity(speed=)` are resolved when the command is applied (radius / direction at apply time), so two scale commands in one queue compound; `radius=`/`velocity=` (value or `f(ctx)`, evaluated during dispatch) are absolute. `ctx.resize(ball, radius)` and `ctx.set_velocity(ball, velocity)` keep the design signatures; the speed form exists only on the action.
+- `set_velocity(speed=)` on a ball at rest leaves it at rest (no direction). A constant-speed ball's `target_speed` becomes the resulting `|v|` after the clamp (0 if at rest, which then holds it at rest).
+- `ctx.resize`/`ctx.set_velocity` on a ring are accepted no-ops (as `ctx.split`, C23); any other non-handle raises `ConfigError`. `recolor` and `flash` work on balls and rings.
+- Flash state lives in `Scene._flash[obj_index] = (colour, start, frames)` (lookup only; a new flash on the same object replaces the old). `start = _frames_done` when applied, i.e. the next drawn frame; `Scene.draw` blends `round(flash + (base − flash)·k/frames)` per channel for `0 ≤ k < frames`, against the base colour at draw time.
+- `constant_speed` on `spawn`: a constant zero velocity is rejected at `A.spawn(...)`; speeds above `max_speed` (unknown at construction) and callable results are checked when the handler evaluates them (`ConfigError`, as other invalid callable results). Spawned and split balls get `target_speed = |initial velocity|`; split uses the parent's `target_speed` as `s` for constant-speed parents.
+- The spatial-hash check (`len(_balls) ≥ 100`, `SPATIAL_HASH_BALLS`) runs after each step's command application, so balls added by `add_ball` before the first step switch at step 1.
+- The engine runs built-in actions via `isinstance(handler, <action union>)`; `ACTION_TYPES` lists all nine for registration checks.
 
 ### M2.6 Determinism strategy (NFR-201)
 

@@ -54,6 +54,10 @@ class Ball:
         """``False`` once the ball has been destroyed (removed from its scene)."""
         self.generation: int = 0
         """How many splits produced this ball: 0 for ``add_ball``/spawn, parent + 1 for a split."""
+        self.constant_speed: bool = False
+        """Whether the scene rescales the velocity to ``target_speed`` after every step (FR-212)."""
+        self.target_speed: float = 0.0
+        """Speed held in constant-speed mode (initial ``|velocity|``, updated by set_velocity)."""
 
     def set_radius(self, radius: float) -> None:
         """Change the radius, keeping density 1 (mass = pi * r^2, moment updated).
@@ -75,6 +79,14 @@ class Ball:
         speed = math.hypot(vx, vy)
         if speed > max_speed:
             scale = max_speed / speed
+            self.body.velocity = (vx * scale, vy * scale)
+
+    def renormalize(self) -> None:
+        """Rescale the velocity to ``target_speed`` keeping direction; zero stays zero."""
+        vx, vy = self.body.velocity
+        speed = math.hypot(vx, vy)
+        if speed > 0:
+            scale = self.target_speed / speed
             self.body.velocity = (vx * scale, vy * scale)
 
     @property
@@ -104,14 +116,18 @@ class Ball:
 
     @property
     def color(self) -> Color:
-        """Fill colour as an RGB tuple."""
+        """Fill colour as an RGB tuple (settable; accepts any colour value)."""
         return self._color
+
+    @color.setter
+    def color(self, value: ColorLike) -> None:
+        self._color = parse_color(value)
 
     @property
     def tags(self) -> frozenset[str]:
         """Tags given at creation."""
         return self._tags
 
-    def draw(self, renderer: Renderer) -> None:
-        """Draw the ball as a filled circle (reads state only)."""
-        renderer.circle(self.position, self._radius, self._color)
+    def draw(self, renderer: Renderer, color: Color | None = None) -> None:
+        """Draw the ball as a filled circle in ``color`` (default: its colour); reads state only."""
+        renderer.circle(self.position, self._radius, self._color if color is None else color)
