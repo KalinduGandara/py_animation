@@ -213,3 +213,20 @@ def test_ctx_destroy_rejects_non_objects() -> None:
     ctx = ActionContext(s, _timer_event(s), None, None)
     with pytest.raises(ConfigError):
         ctx.destroy(42)  # type: ignore[arg-type]
+
+
+def test_events_from_when_commands_carry_the_simulated_frame() -> None:
+    # FR-201: frame is the frame being simulated; `when` commands run after the
+    # frame's last step, so their destroy/spawn events belong to that frame.
+    s = Scene(duration=1.0, gravity=(0, 0))
+    b = s.add_ball(pos=(200, 200), radius=10, tags={"ball"})
+    s.when(
+        lambda sc: sc.frame >= 3,
+        [A.destroy(target=b), A.spawn(pos=(300, 300), radius=10)],
+    )
+    for _ in range(5):
+        s.step_frame()
+    cond = next(e for e in s.events if e.kind == "condition")
+    for kind in ("destroy", "spawn"):
+        ev = next(e for e in s.events if e.kind == kind)
+        assert (ev.step, ev.frame) == (cond.step, cond.frame)

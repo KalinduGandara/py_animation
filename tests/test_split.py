@@ -157,10 +157,12 @@ def test_split_refused_on_tunnelling_and_render_continues() -> None:
 
 
 def test_split_on_wall_does_not_resplit_children_within_cooldown() -> None:
+    # Children are placed clear of the wall (C16); after this grazing hit the
+    # wall-side child (spread 60) heads back into the wall within the cooldown.
     s = Scene(width=400, height=400, duration=2.0, gravity=(0, 0), max_speed=2000)
     s.add_circle(center=(200, 200), radius=150, thickness=8, tags={"wall"})
-    s.add_ball(pos=(260, 200), radius=20, velocity=(150, 0), tags={"ball"})
-    s.on_collision("ball", "wall", [A.split(into=2, spread_degrees=20), A.play(S.note("C5"))])
+    s.add_ball(pos=(200, 320), radius=20, velocity=(150, 20), tags={"ball"})
+    s.on_collision("ball", "wall", [A.split(into=2, spread_degrees=60), A.play(S.note("C5"))])
     while not _spawns(s):
         s.step_frame()
     first = _spawns(s)[0].step
@@ -181,3 +183,50 @@ def test_cascaded_split_events_reach_on_spawn_next_step() -> None:
     s.step_frame()
     child = s.objects[1]
     assert seen == [(1, 0, child)]
+
+
+def _ring_scene(ball_pos: tuple[float, float], velocity: tuple[float, float]) -> tuple[Scene, Ball]:
+    s = Scene(duration=2.0, gravity=(0, 0), max_balls=4)
+    s.add_circle(center=(540, 960), radius=450, thickness=8, tags={"wall"})
+    ball = s.add_ball(pos=ball_pos, radius=18, velocity=velocity, tags={"ball"})
+    return s, ball
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.25, 1.5])
+def test_split_at_grazing_inner_wall_keeps_children_clear_of_the_wall(scale: float) -> None:
+    # Ball touching the bottom of the ring from inside and moving along it: the
+    # perpendicular offset points straight into the wall (C16 placement correction).
+    s, ball = _ring_scene((540, 960 + 450 - 4 - 18 - 0.5), (500, 0))
+    A.split(into=2, spread_degrees=10, radius_scale=scale).run(_ctx(s, ball))
+    s._apply_commands()
+    r2 = 18 * scale
+    inner = 450 * math.cos(math.pi / 128) - 4  # chord midpoint of the inner surface
+    balls = [b for b in s.objects if isinstance(b, Ball)]
+    assert len(balls) == 2
+    for b in balls:
+        assert math.dist(b.position, (540, 960)) + r2 <= inner + 1e-6
+    # the formation is only translated: spacing is unchanged
+    assert math.dist(balls[0].position, balls[1].position) == pytest.approx(2 * r2 + 1)
+
+
+def test_split_outside_ring_keeps_children_outside() -> None:
+    s, ball = _ring_scene((540, 960 + 450 + 4 + 18 + 0.5), (500, 0))
+    A.split(into=3, spread_degrees=10, radius_scale=1.25).run(_ctx(s, ball))
+    s._apply_commands()
+    for b in s.objects:
+        if isinstance(b, Ball):
+            assert math.dist(b.position, (540, 960)) - 22.5 >= 454 - 1e-6
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.25, 1.5])
+@pytest.mark.parametrize("deg", [5, 10, 20])
+def test_grazing_split_children_stay_inside_closed_ring(scale: float, deg: int) -> None:
+    rad = math.radians(deg)
+    s, _ = _ring_scene((390, 1350), (500 * math.cos(rad), 500 * math.sin(rad)))
+    s.on_collision("ball", "wall", [A.split(into=2, spread_degrees=10, radius_scale=scale)])
+    while s.frame < s.total_frames:
+        s.step_frame()
+        for b in s.objects:
+            if isinstance(b, Ball):
+                assert math.dist(b.position, (540, 960)) + b.radius < 446 + 1.0
+    assert any(e.kind == "spawn" for e in s.events)

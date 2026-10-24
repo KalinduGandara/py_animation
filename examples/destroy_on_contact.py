@@ -1,7 +1,8 @@
-"""Balls rain onto a hazard and are destroyed on contact; the video ends after the fifth.
+"""Balls bounce around a ring and are destroyed on contact with a hazard in the middle.
 
-``every`` spawns a new ball each half second, a Python callback counts the hits, and
-``when`` + ``end_after`` ends the video a second after the fifth one.
+``every`` throws a new ball sideways each half second (at most 6 live), wall bounces
+pluck a note, a Python callback counts the hazard hits, and ``when`` + ``end_after``
+ends the video a second after the fifth one.
 
 Render:   uv run bouncekit render examples/destroy_on_contact.py --seed 42
 Preview:  uv run bouncekit preview examples/destroy_on_contact.py   (silent)
@@ -18,19 +19,25 @@ scene = Scene(duration=30.0, seed=42, background="#140c14")
 
 scene.add_circle(center=CENTER, radius=450, thickness=8, color="#ffffff", tags={"wall"})
 scene.add_circle(center=CENTER, radius=90, thickness=16, color="#e63946", tags={"hazard"})
-scene.add_ball(pos=(500, 560), radius=26, color="#ffd166", tags={"ball"})
+scene.add_ball(pos=(500, 560), velocity=(420.0, 0.0), radius=26, color="#ffd166", tags={"ball"})
 
 kills: list[int] = []
 
 
 def drop_pos(ctx):  # type: ignore[no-untyped-def]
-    """A spot near the top of the ring, jittered with ``ctx.rng``."""
-    return (CENTER[0] + ctx.rng.uniform(-80.0, 80.0), 600.0)
+    """A spot in the upper part of the ring, jittered with ``ctx.rng``."""
+    return (CENTER[0] + ctx.rng.uniform(-250.0, 250.0), 650.0)
+
+
+def throw(ctx):  # type: ignore[no-untyped-def]
+    """A sideways throw, so balls bounce off the wall before finding the hazard."""
+    side = 1.0 if ctx.rng.random() < 0.5 else -1.0
+    return (side * ctx.rng.uniform(350.0, 650.0), ctx.rng.uniform(-200.0, 0.0))
 
 
 scene.every(
     0.5,
-    [A.spawn(pos=drop_pos, radius=26, color="#ffd166", max_total=12)],
+    [A.spawn(pos=drop_pos, velocity=throw, radius=26, color="#ffd166", max_total=6)],
 )
 scene.on_collision("ball", "wall", [A.play(S.scale("E4", voice="pluck"))])
 

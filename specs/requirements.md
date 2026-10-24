@@ -174,7 +174,7 @@ Terms: a **rule** is one registration (`on_collision`, `on_escape`, `on_spawn`, 
 - THE SYSTEM SHALL record every event as an immutable `Event(kind, step, frame, time, objects, speed, position)` in `scene.events`, where `kind` is one of `"collision"`, `"escape"`, `"spawn"`, `"destroy"`, `"timer"`, `"condition"`; `CollisionEvent` SHALL remain importable from `bouncekit.events` as the same class, so M1 code constructing `CollisionEvent(kind="collision", ...)` keeps working.
 - `objects` SHALL be: collision → the two objects (FR-101); escape → `(ring, ball)`; spawn/destroy → `(ball,)` (or `(ring,)` for a destroyed ring); timer/condition → `()`.
 - `speed` SHALL be: collision → FR-101 impact speed; escape/spawn/destroy → the ball's speed (px/s) at that moment (0.0 for a ring); timer/condition → `None`. `position` SHALL be the contact point, the ball centre, or `None` for timer/condition.
-- `step`/`time` SHALL be the step in which the event happened (`time = step / rate`); `frame` SHALL be the video frame being simulated. `scene.events` SHALL be identical across two runs with the same seed.
+- `step`/`time` SHALL be the step in which the event happened (`time = step / rate`); `frame` SHALL be the video frame being simulated (for spawn/destroy events from commands applied after a frame by a `when` rule: that frame, the same as the condition event's). `scene.events` SHALL be identical across two runs with the same seed.
 
 ### FR-202 Rule registration — [API], [Arch]
 - THE SYSTEM SHALL provide `scene.on_collision(tag_a, tag_b, handlers=None, *, cooldown=None, object_cooldown=0.0)`, `scene.on_escape(ring, tag, handlers=None, *, margin=0.0)`, `scene.on_spawn(tag, handlers=None)`, `scene.on_destroy(tag, handlers=None)`, `scene.every(seconds, handlers=None)`, `scene.at(seconds, handlers=None)` and `scene.when(predicate, handlers=None)`.
@@ -210,6 +210,7 @@ Terms: a **rule** is one registration (`on_collision`, `on_escape`, `on_spawn`, 
 - `A.split(*, into=2, spread_degrees=30.0, radius_scale=1.0, max_total=None, target="a")` and `ctx.split(ball, **same)` SHALL split a ball into `into` balls: the parent ball stays (same handle) as child 0 and `into − 1` new balls are spawned.
 - Let `v` = the parent's velocity when the command is applied, `s = |v|` (or the parent's constant-speed target, FR-212), `θ = atan2(v)` (0 when `s = 0`). Child `i` (0..into−1) SHALL get velocity `s · (cos φᵢ, sin φᵢ)` with `φᵢ = θ + spread · (i / (into − 1) − ½)` (degrees → radians).
 - Child `i` SHALL be placed at `parent_pos + (i − (into − 1)/2) · (2·r' + 1) · (−sin θ, cos θ)`, where `r' = parent_radius × radius_scale`; the parent is moved and resized to `r'` too.
+- WHEN a child placed this way would overlap a live ring's wall, THE SYSTEM SHALL translate the whole formation (spacing unchanged) radially toward the parent's side of that ring until every child is at least 0.5 px clear of the wall surface (inner surface at the segment chord midpoints, `R·cos(π/segments) − thickness/2`; outer surface `R + thickness/2`); rings whose band contains the parent centre (passing a gap) are skipped (C16).
 - Every child SHALL have `generation = parent.generation + 1` and inherit colour, tags, elasticity and constant-speed mode; new children inherit the parent's rule cooldown and play-retrigger timestamps (C7). `add_ball` balls have generation 0.
 - WHEN `r'` would violate the tunnelling condition (NFR-003) with any live ring, or the cap check (FR-205) fails, THE SYSTEM SHALL refuse the split: the parent is unchanged and no spawn events are emitted (C8).
 - WHEN the target is not a live `Ball` (e.g. a ring), the command SHALL be a no-op.
@@ -250,7 +251,7 @@ Terms: a **rule** is one registration (`on_collision`, `on_escape`, `on_spawn`, 
 ### FR-213 Examples — [M2]
 - `examples/split_on_wall.py`: one ball in a ring; `on_collision("ball", "wall", [A.split(...), A.play(S.scale(...))])` doubles the ball count on each wall hit until a cap (≤ 256 balls).
 - `examples/escape_rotating_gap.py`: a ring with a gap and non-zero `angular_velocity`; `on_escape(ring, "ball", [A.destroy(), A.spawn(count=2, pos=ring centre, ...), A.play(...)])`.
-- `examples/destroy_on_contact.py`: balls are destroyed on contact with a tagged hazard (via a built-in `A.destroy` and/or a Python callback), with `every` spawning new balls and a `when` + `end_after` ending the video.
+- `examples/destroy_on_contact.py`: balls are destroyed on contact with a tagged hazard (via a built-in `A.destroy` and/or a Python callback), with `every` spawning new balls and a `when` + `end_after` ending the video. Spawned balls SHALL reach the wall (its sound rule fires) and several SHALL be live at once, up to the spawn's `max_total`.
 - Each example SHALL render with `bouncekit render` to an MP4 with an AAC track.
 
 ### Non-functional (M2)

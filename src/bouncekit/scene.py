@@ -107,6 +107,9 @@ class Scene:
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
         self.rng: random.Random = random.Random(self.config.seed)
         self.frame: int = 0
+        # Frame of the latest simulated step: event ``frame`` for commands applied
+        # after the frame (``when`` rules) as well as during it (FR-201).
+        self._sim_frame: int = 0
         self.total_frames: int = round(self.config.duration * self.config.fps)
         self.space = pymunk.Space()
         self.space.gravity = self.config.gravity
@@ -560,7 +563,7 @@ class Scene:
         self._objects.remove(obj)
         obj.alive = False
         ev = Event(
-            "destroy", self._step, self.frame, self._step / self._rate, (obj,), speed, position
+            "destroy", self._step, self._sim_frame, self._step / self._rate, (obj,), speed, position
         )
         self._events.append(ev)
         self._cascade.append(ev)
@@ -585,7 +588,7 @@ class Scene:
         ev = Event(
             "spawn",
             self._step,
-            self.frame,
+            self._sim_frame,
             self._step / self._rate,
             (ball,),
             math.hypot(*ball.velocity),
@@ -747,6 +750,7 @@ class Scene:
         engine = self._engine
         frame = self.frame
         rec.frame = frame
+        self._sim_frame = frame
         self._in_frame = True
         try:
             for _ in range(self.config.substeps):

@@ -171,6 +171,8 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
         phi = theta + spread * (i / (cmd.into - 1) - 0.5)
         k = (i - (cmd.into - 1) / 2) * gap
         states.append(((px + k * nx, py + k * ny), (speed * math.cos(phi), speed * math.sin(phi))))
+    positions = _clear_of_rings(scene, parent.position, [pos for pos, _ in states], r2)
+    states = [(pos, vel) for pos, (_, vel) in zip(positions, states, strict=True)]
     parent.set_radius(r2)
     parent.position, parent.velocity = states[0]
     parent.generation += 1
@@ -180,6 +182,56 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
         )
         child = scene._spawn_ball(spec, generation=parent.generation)
         scene._inherit(parent, child)
+
+
+# Clearance kept between a split child and a ring's surface, px.
+_WALL_CLEARANCE = 0.5
+# Translation passes per ring; each pass fixes the worst child exactly.
+_CLEAR_PASSES = 8
+
+
+def _clear_of_rings(scene: "Scene", origin: Vec, positions: list[Vec], radius: float) -> list[Vec]:
+    """Translate the split formation so no child overlaps a ring wall (C16).
+
+    For each live ring (insertion order) whose band the parent centre ``origin`` is
+    clearly inside or outside of, the whole formation is shifted radially, worst
+    child first, until every child of ``radius`` is at least ``_WALL_CLEARANCE`` px
+    clear of the ring's inner surface (chord midpoints) or outer surface. Spacing
+    between children is unchanged. A parent inside the band (passing a gap) leaves
+    that ring alone.
+    """
+    pts = list(positions)
+    for ring in scene._rings:
+        cx, cy = ring.center
+        half = ring.thickness / 2
+        d0 = math.hypot(origin[0] - cx, origin[1] - cy)
+        if d0 <= ring.radius - half:
+            inside = True
+            limit = ring.radius * math.cos(math.pi / ring._segment_count) - half
+            limit -= radius + _WALL_CLEARANCE
+        elif d0 >= ring.radius + half:
+            inside = False
+            limit = ring.radius + half + radius + _WALL_CLEARANCE
+        else:
+            continue
+        for _ in range(_CLEAR_PASSES):
+            worst = 0.0
+            ux = uy = 0.0
+            for x, y in pts:
+                d = math.hypot(x - cx, y - cy)
+                excess = d - limit if inside else limit - d
+                if excess > worst:
+                    worst = excess
+                    if d > 0:
+                        ux, uy = (x - cx) / d, (y - cy) / d
+                    else:
+                        ux, uy = 1.0, 0.0
+            if worst <= 0:
+                break
+            sign = -1.0 if inside else 1.0
+            dx, dy = sign * worst * ux, sign * worst * uy
+            pts = [(x + dx, y + dy) for x, y in pts]
+    return pts
 
 
 def _spawn(scene: "Scene", cmd: SpawnCmd) -> None:

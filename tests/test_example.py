@@ -230,6 +230,25 @@ def test_destroy_example_destroys_and_ends_early() -> None:
     assert scene.total_frames <= full
 
 
+def test_destroy_example_exercises_wall_sound_and_spawn_cap() -> None:
+    # Balls must reach the wall (pluck rule), several must be live at once, and the
+    # every-spawn cap must be reached, not only the hazard path.
+    scene = load_scene(M2["destroy_on_contact"], seed=42)
+    most = 0
+    for _ in range(scene.total_frames):
+        scene.step_frame()
+        most = max(most, scene.count("ball"))
+        if scene.frame >= scene.total_frames:
+            break
+    walls = [
+        e
+        for e in scene.events
+        if e.kind == "collision" and {t for o in e.objects for t in o.tags} == {"ball", "wall"}
+    ]
+    assert walls
+    assert most == 6
+
+
 def test_split_example_is_deterministic() -> None:
     def run(seed: int) -> tuple[bytes, list[tuple[int, str]]]:
         scene = load_scene(M2["split_on_wall"], seed=seed, duration=4)
