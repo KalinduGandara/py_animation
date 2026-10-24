@@ -1,6 +1,7 @@
 """Scene: configuration, seeded RNG, object registry, fixed-step loop and frames."""
 
 import random
+import sys
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
@@ -187,3 +188,14 @@ class Scene:
             for frame in self.frames():
                 writer.write(frame)
         return path
+
+    def run(self) -> None:
+        """Dispatch to the ``bouncekit`` CLI using ``sys.argv``; call from ``__main__``.
+
+        The running script (``sys.argv[0]``) is the scene file and is reloaded by the
+        CLI so ``--seed``/``--duration`` apply; with no subcommand it previews.
+        Exits the process with the CLI's exit code.
+        """
+        from bouncekit import cli  # local import: cli imports this module
+
+        raise SystemExit(cli.main(sys.argv[1:], default_scene=Path(sys.argv[0])))

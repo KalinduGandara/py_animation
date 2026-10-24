@@ -11,3 +11,7 @@ class ConfigError(BouncekitError):
 
 class FfmpegError(BouncekitError):
     """ffmpeg is missing or failed while encoding."""
+
+
+class SceneLoadError(BouncekitError):
+    """A scene file is missing or does not define exactly one ``Scene``."""

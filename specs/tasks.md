@@ -27,7 +27,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: export/ffmpeg.py, scene.py, tests/test_export.py
   - Done when: tiny real encode probes as h264/yuv420p with right size+fps; missing-ffmpeg and bad-frame-length errors tested.
 
-- [ ] T-006: CLI — `load_scene` with overrides, `render`/`preview` subcommands, `Scene.run`, error exit codes.
+- [x] T-006: CLI — `load_scene` with overrides, `render`/`preview` subcommands, `Scene.run`, error exit codes.
   - Requirements: FR-010, FR-006
   - Files: cli.py, scene.py, tests/test_cli.py, tests/fixtures/*.py
   - Done when: single/zero/many scenes, override-before-script, `__main__` skipped, missing file, and end-to-end `render` on a tiny fixture scene tested and passing.
