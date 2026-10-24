@@ -112,7 +112,7 @@ class Preview:
         self._signature = sig
         self._load(now)
         if self.error is None:
-            print("reloaded", flush=True)
+            print(f"reloaded {self._watch}", file=sys.stderr, flush=True)
 
     def handle_event(self, event: "pygame.event.Event") -> None:
         """React to one pygame event."""

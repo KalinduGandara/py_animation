@@ -127,6 +127,25 @@ def test_trail_layer_decays_to_exactly_zero_within_bound() -> None:
     assert set(r.to_rgb_bytes()) == {255}
 
 
+@pytest.mark.parametrize("seconds", [0.3, 1.0, 2.0, 5.0, 30.0])
+def test_trail_fades_to_five_percent_after_trail_seconds(seconds: float) -> None:
+    # FR-303: keep = 0.05 ** (1 / (trail_seconds * fps)); a full-white trail pixel
+    # follows 255 * keep**n, so it is at ~5 % (12..13) after trail_seconds, not sooner.
+    fps = 60
+    keep = EffectsConfig(trail_seconds=seconds).trail_keep(fps)
+    frames = round(seconds * fps)
+    r = PygameRenderer(40, 40)
+    r.clear(BLACK)
+    r.trails([WHITE_BAR], keep=keep, reset=True)
+    for n in range(1, frames + 1):
+        r.clear(BLACK)
+        r.trails([], keep=keep, reset=False)
+        value = _pixel(r.to_rgb_bytes(), 40, 20, 20)[0]
+        expected = 255 * keep**n
+        assert expected - 1.5 <= value <= expected, (n, value, expected)
+    assert 12 <= value <= 13
+
+
 def test_trail_segment_decays_partially_after_one_frame() -> None:
     r = PygameRenderer(40, 40)
     r.clear(BLACK)

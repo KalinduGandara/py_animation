@@ -190,7 +190,9 @@ def test_reload_replaces_scene_and_prints_reloaded(
     assert pv.scene is not old
     assert pv.scene.frame == 0
     assert pv.scene.config.background != old.config.background
-    assert "reloaded" in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert f"reloaded {file}" in captured.err  # FR-310: path, on stderr
+    assert "reloaded" not in captured.out
     assert "reloaded" in pv._title()
 
 
