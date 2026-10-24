@@ -1,6 +1,6 @@
 # Clarifications — bouncekit
 
-Source SRS: the user's master prompt ("Master Prompt: `bouncekit`"), current scope **M0 only**.
+Source SRS: `specs/srs.md` (the user's master prompt, verbatim). Scope: M0–M4 (M5 later, only when asked).
 
 ## Environment findings (2026-10-24)
 
@@ -47,3 +47,14 @@ User reply: "approved start implementing" → **all recommended defaults accepte
 - A5. Gap orientation: the gap is centred on angle 0° (pointing +x) in the ring's local frame; screen angles increase clockwise (y down). Rotation moves it.
 - A6. Canvas width/height must be even (yuv420p requirement); validated with a clear error.
 
+
+## Round 2 — M0 review (2026-10-24)
+
+User decisions:
+- Tunnelling risk is a `ConfigError`, not a warning.
+- Ring edges looked jagged → fixed with signed-distance anti-aliasing (see design §4.2).
+- ruff and mypy stay as dev tools.
+- Untested CRF/faststart and preview pacing: "handle appropriately" → automated tests added.
+- **Implement M1–M4 now without stopping between milestones** (overrides the SRS "stop after each milestone"); M5 (Rube Goldberg) stays out of scope. Use workflows; Sonnet for less complex tasks.
+- `soundfile` and `mido` are in the SRS stack, so adding them in M1/M3 needs no further approval. Any other new runtime dependency still needs the user.
+- For each milestone, genuinely ambiguous decisions are made by the spec author with the recommended default, recorded below as "M<n> assumptions", and reported to the user at the end.
