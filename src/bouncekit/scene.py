@@ -2,21 +2,28 @@
 
 import random
 import sys
-from collections.abc import Iterable, Iterator
+import tempfile
+from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path
 
+import numpy as np
 import pymunk
+from numpy.typing import NDArray
 
+from bouncekit.actions import Play
+from bouncekit.audio.mixer import NoteTrigger, mix, num_samples, sample_offset
 from bouncekit.colors import ColorLike
-from bouncekit.config import SceneConfig, Vec
+from bouncekit.config import AudioConfig, SceneConfig, Vec
 from bouncekit.errors import ConfigError
-from bouncekit.export.ffmpeg import FfmpegWriter, require_ffmpeg
+from bouncekit.events import CollisionEvent, EventRecorder, WorldObject
+from bouncekit.export.audio import write_wav
+from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
-WorldObject = CircleBoundary | Ball
+__all__ = ["Scene", "WorldObject"]
 
 # Overrides (``seed``, ``duration``) set by the CLI while it executes a scene script.
 # ``Scene.__init__`` applies them before creating ``rng``.
@@ -43,8 +50,11 @@ class Scene:
         gravity: Vec = (0.0, 900.0),
         substeps: int = 8,
         max_speed: float = 4000.0,
+        audio: AudioConfig | None = None,
     ) -> None:
         """Validate the settings and create an empty world.
+
+        ``audio`` defaults to ``AudioConfig()``.
 
         Raises:
             ConfigError: if any setting is invalid.
@@ -59,6 +69,7 @@ class Scene:
             "gravity": gravity,
             "substeps": substeps,
             "max_speed": max_speed,
+            "audio": AudioConfig() if audio is None else audio,
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
@@ -73,6 +84,12 @@ class Scene:
         self._objects: list[WorldObject] = []
         self._balls: list[Ball] = []
         self._rings: list[CircleBoundary] = []
+        self._step = 0
+        self._events: list[CollisionEvent] = []
+        self._rules: list[tuple[str, str, tuple[Play, ...]]] = []
+        self._triggers: list[NoteTrigger] = []
+        self._recorder = EventRecorder(self.config.fps * self.config.substeps)
+        self._recorder.install(self.space)
 
     @property
     def time(self) -> float:
@@ -83,6 +100,78 @@ class Scene:
     def objects(self) -> tuple[WorldObject, ...]:
         """All world objects in insertion order."""
         return tuple(self._objects)
+
+    @property
+    def events(self) -> tuple[CollisionEvent, ...]:
+        """Collision events recorded so far, in recording order."""
+        return tuple(self._events)
+
+    @property
+    def triggers(self) -> tuple[NoteTrigger, ...]:
+        """Notes triggered by sound rules so far, in trigger order."""
+        return tuple(self._triggers)
+
+    @property
+    def has_sound(self) -> bool:
+        """Whether any rule plays sound (then ``render`` muxes an audio track)."""
+        return any(actions for _, _, actions in self._rules)
+
+    def on_collision(self, tag_a: str, tag_b: str, actions: Sequence[Play]) -> None:
+        """When objects tagged ``tag_a`` and ``tag_b`` start touching, run ``actions``.
+
+        Tags match in either order. In this version every action must be an
+        ``A.play(...)``. Rules run after each frame's physics, in registration order.
+
+        Raises:
+            ConfigError: for an empty or non-string tag, or ``actions`` that is not a
+                list/tuple of play actions.
+        """
+        for name, tag in (("tag_a", tag_a), ("tag_b", tag_b)):
+            if not isinstance(tag, str) or not tag:
+                raise ConfigError(f"{name} must be a non-empty string; got {tag!r}")
+        if not isinstance(actions, list | tuple) or not all(
+            isinstance(act, Play) for act in actions
+        ):
+            raise ConfigError(
+                f"actions must be a list of actions such as A.play(...); got {actions!r}"
+            )
+        self._rules.append((tag_a, tag_b, tuple(actions)))
+
+    def _dispatch(self, events: Sequence[CollisionEvent]) -> None:
+        """Turn this frame's events into note triggers (outside collision callbacks)."""
+        cfg = self.config
+        for ev in events:
+            first, second = ev.objects
+            for tag_a, tag_b, actions in self._rules:
+                if not (
+                    (tag_a in first.tags and tag_b in second.tags)
+                    or (tag_a in second.tags and tag_b in first.tags)
+                ):
+                    continue
+                for act in actions:
+                    src = act.source
+                    self._triggers.append(
+                        NoteTrigger(
+                            step=ev.step,
+                            offset=sample_offset(ev.step, cfg.fps, cfg.substeps),
+                            voice=src.voice,
+                            hz=src.hz,
+                            gain=act.gain,
+                        )
+                    )
+
+    def audio_buffer(self) -> NDArray[np.float32]:
+        """Mix the notes triggered so far: float32, shape ``(n, 2)``, 48 kHz.
+
+        ``n`` is ``round(frame * 48000 / fps)`` for the frames simulated so far.
+        """
+        cfg = self.config
+        return mix(
+            self._triggers,
+            length=num_samples(self.frame, cfg.fps),
+            config=cfg.audio,
+            seed=cfg.seed,
+        )
 
     def add_circle(
         self,
@@ -119,6 +208,7 @@ class Scene:
         )
         for ball in self._balls:
             self._check_tunnelling(ball, ring)
+        self._recorder.register(len(self._objects), ring, ring.shapes)
         self._objects.append(ring)
         self._rings.append(ring)
         return ring
@@ -150,6 +240,7 @@ class Scene:
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
+        self._recorder.register(len(self._objects), ball, [ball.shape])
         self._objects.append(ball)
         self._balls.append(ball)
         return ball
@@ -173,13 +264,21 @@ class Scene:
     def step_frame(self) -> None:
         """Advance the simulation by one frame (``substeps`` fixed physics steps)."""
         max_speed = self.config.max_speed
+        rec = self._recorder
+        rec.frame = self.frame
+        first_event = len(self._events)
         for _ in range(self.config.substeps):
+            self._step += 1
+            rec.step = self._step
             self.space.step(self._dt)
+            self._events.extend(rec.flush())
             # Clamp after the whole step: collision impulses land after velocity
             # integration, so a clamp inside velocity_func would miss them.
             for ball in self._balls:
                 ball.clamp_speed(max_speed)
         self.frame += 1
+        if self._rules:
+            self._dispatch(self._events[first_event:])
 
     def draw(self, renderer: Renderer) -> None:
         """Draw the background and every object, in insertion order.
@@ -206,7 +305,9 @@ class Scene:
     def render(self, out: str | Path) -> Path:
         """Simulate and encode the whole scene to an H.264 MP4 at ``out``.
 
-        Parent directories are created. ffmpeg is checked before simulating.
+        Parent directories are created. ffmpeg is checked before simulating. If the
+        scene has sound rules, the mix is muxed in as 48 kHz stereo AAC; otherwise
+        the MP4 has no audio stream.
 
         Raises:
             FfmpegError: if ffmpeg is missing or fails.
@@ -215,9 +316,18 @@ class Scene:
         path = Path(out)
         path.parent.mkdir(parents=True, exist_ok=True)
         cfg = self.config
-        with FfmpegWriter(path, cfg.width, cfg.height, cfg.fps) as writer:
-            for frame in self.frames():
-                writer.write(frame)
+        if not self.has_sound:
+            with FfmpegWriter(path, cfg.width, cfg.height, cfg.fps) as writer:
+                for frame in self.frames():
+                    writer.write(frame)
+            return path
+        with tempfile.TemporaryDirectory(dir=path.parent, prefix=".bouncekit-") as tmp:
+            video, wav = Path(tmp) / "video.mp4", Path(tmp) / "audio.wav"
+            with FfmpegWriter(video, cfg.width, cfg.height, cfg.fps) as writer:
+                for frame in self.frames():
+                    writer.write(frame)
+            write_wav(wav, self.audio_buffer())
+            mux(video, wav, path)
         return path
 
     def preview(self, scale: float = 0.45) -> None:

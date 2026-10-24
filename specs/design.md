@@ -370,6 +370,13 @@ AAC encoder delay is recorded by ffmpeg as an edit list in MP4, so players align
 - Pluck noise seeds derive from scene seed + note parameters, not from a shared stream, so caching and trigger order cannot change sound.
 - Tests: two fresh builds of the same scene → `audio_buffer().tobytes()` equal and `events` equal (compare `(step, speed, position, object indices)`); different seed → buffers differ.
 
+### M1.8a Implementation notes (T-101)
+
+- `SAMPLE_RATE` lives in `audio/voices.py` (voices need it and the mixer imports voices); `audio/mixer.py` re-exports it, so `from bouncekit.audio.mixer import SAMPLE_RATE` works as designed.
+- Staged within M1: after T-101 `VOICES` holds only `"sine"`, `Source = Note`, `AudioConfig` validates only `peak_dbfs` (and `SceneConfig.audio`'s type), and `_dispatch` applies no trigger policy (gain = `play.gain`, no polyphony limit). T-102/T-103 add the rest.
+- `EventRecorder` stores `owners: dict[Shape, (index, object)]` itself (instead of `Scene._owner`); lookup only, never iterated.
+- Temp dir for muxing is `.bouncekit-*` inside `out.parent`.
+
 ### M1.9 Key decisions and alternatives
 
 | Decision | Chosen | Alternatives (rejected because) |

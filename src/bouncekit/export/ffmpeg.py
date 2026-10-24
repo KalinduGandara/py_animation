@@ -1,4 +1,4 @@
-"""ffmpeg export: pipe raw RGB24 frames to an H.264 encoder (FR-007)."""
+"""ffmpeg export: pipe raw RGB24 frames to an H.264 encoder (FR-007); mux audio (FR-109)."""
 
 import shutil
 import subprocess
@@ -117,3 +117,35 @@ class FfmpegWriter:
         tail = self._finish()
         if self._returncode != 0:
             raise FfmpegError(f"ffmpeg failed (exit {self._returncode}):\n{tail}")
+
+
+def _mux_command(exe: str, video: Path, wav: Path, out: Path) -> list[str]:
+    return [
+        exe, "-hide_banner", "-loglevel", "error", "-y",
+        "-i", str(video), "-i", str(wav),
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+        "-movflags", "+faststart", "-fflags", "+bitexact",
+        str(out),
+    ]  # fmt: skip
+
+
+def mux(video: str | Path, wav: str | Path, out: str | Path) -> None:
+    """Combine an H.264 MP4 and a WAV into ``out``: video copied, audio AAC 192 kb/s.
+
+    Audio is 48 kHz stereo; the file is ``+faststart``.
+
+    Raises:
+        FfmpegError: if ffmpeg is missing or fails (with its stderr tail).
+    """
+    exe = require_ffmpeg()
+    proc = subprocess.run(
+        _mux_command(exe, Path(video), Path(wav), Path(out)),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if proc.returncode != 0:
+        tail = proc.stderr.decode(errors="replace")[-_STDERR_TAIL:].strip()
+        raise FfmpegError(f"ffmpeg mux failed (exit {proc.returncode}):\n{tail}")

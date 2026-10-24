@@ -70,10 +70,38 @@ def _tags(value: object) -> frozenset[str]:
 
 
 @dataclass(frozen=True)
+class AudioConfig:
+    """Sound settings for a scene (sample rate is fixed at 48 000 Hz).
+
+    Attributes:
+        min_impact_speed: px/s; slower impacts play nothing.
+        reference_speed: px/s; impact speed that gives full gain.
+        min_retrigger_interval: seconds between notes of one play action for one object.
+        max_triggers_per_frame: notes started per video frame, all rules together.
+        max_polyphony: notes sounding at once before the oldest is cut.
+        peak_dbfs: peak level of the final mix in dBFS (<= 0).
+    """
+
+    min_impact_speed: float = 40.0
+    reference_speed: float = 1500.0
+    min_retrigger_interval: float = 0.05
+    max_triggers_per_frame: int = 6
+    max_polyphony: int = 24
+    peak_dbfs: float = -1.0
+
+    def __post_init__(self) -> None:
+        peak = _finite_number("peak_dbfs", self.peak_dbfs)
+        if peak > 0:
+            raise ConfigError(f"peak_dbfs must be <= 0; got {self.peak_dbfs!r}")
+        object.__setattr__(self, "peak_dbfs", peak)
+
+
+@dataclass(frozen=True)
 class SceneConfig:
     """Immutable, validated scene settings (pixels, origin top-left, +y down).
 
     ``background`` accepts a colour string or tuple and is stored as an RGB tuple.
+    ``audio`` holds the sound settings (:class:`AudioConfig`).
     """
 
     width: int = 1080
@@ -85,8 +113,11 @@ class SceneConfig:
     gravity: Vec = (0.0, 900.0)
     substeps: int = 8
     max_speed: float = 4000.0
+    audio: AudioConfig = field(default_factory=AudioConfig)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.audio, AudioConfig):
+            raise ConfigError(f"audio must be an AudioConfig; got {self.audio!r}")
         _positive_even_int("width", self.width)
         _positive_even_int("height", self.height)
         _positive_int("fps", self.fps)
