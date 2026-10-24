@@ -343,8 +343,9 @@ Cursor state lives in the scene (`dict[Scale, int]`, `Scale` hashes by identity)
 
 Voices (`render(hz, seed)`, `n = round(duration × 48000)` samples, `t = arange(n) / 48000`):
 - `Sine`/`Triangle`: oscillator from phase 0 (`sin`, or `2/π · arcsin(sin)`) × ADSR (`attack` ramp from 0, `decay` to `sustain`, hold, `release` to 0 ending at `duration`; if `attack + decay + release > duration` scale the three to fit).
-- `Pluck`: Karplus-Strong. Delay length `N = max(2, round(48000 / hz − 0.5))` (T-102 deviation: the two-tap average adds half a sample of loop delay, so `round(48000 / hz)` played 880 Hz 1.7 % flat; now ≤ 0.4 % off for 220–880 Hz); initial buffer = uniform noise in [−1, 1] from `default_rng([seed % 2**32, round(hz * 1000), round(damping * 1e6)])`, mean removed; loop `y[i] = damping · 0.5 · (y[i−N] + y[i−N−1])` in vectorised blocks of `N`; `y[0] = 0`; 2 ms attack ramp; normalised to peak 1.
-- `Marimba`: partials at ratios 1, 3.93 (+−) and 9.3 with amplitudes 1, 0.35, 0.1 and decay times `decay`, `decay/3`, `decay/8`; 1 ms attack; partials above 20 kHz omitted; normalised to peak 1.
+- `Pluck`: Karplus-Strong. Delay length `N = max(2, round(48000 / hz − 0.5))` (T-102 deviation: the two-tap average adds half a sample of loop delay, so `round(48000 / hz)` played 880 Hz 1.7 % flat); the loop then sounds at `48000 / (N + 0.5)`, so the string is rendered to `m = ceil((n − 1) · ratio) + 2` samples and read back with `np.interp` at `arange(n) · ratio`, `ratio = hz · (N + 0.5) / 48000`, which is exact pitch (M1 review fix: the integer delay alone was +14 cents at C6, +33 at C7; a fractional allpass would need a per-sample Python loop). Initial buffer = uniform noise in [−1, 1] from `default_rng([seed % 2**32, round(hz * 1000), round(damping * 1e6)])`, smoothed by one circular `[1, 2, 1] / 4` pass (M1 review fix: full-band noise had a true peak 1.43× the sample peak and overshot after AAC), mean removed; loop `y[i] = damping · 0.5 · (y[i−N] + y[i−N−1])` in vectorised blocks of `N`; `y[0] = 0`; 2 ms attack ramp; 50 ms linear release to 0 at the end; normalised to peak 1.
+- `Marimba`: partials at ratios 1, 3.93 (+−) and 9.3 with amplitudes 1, 0.35, 0.1 and decay times `decay`, `decay/3`, `decay/8`; 1 ms attack; partials above 20 kHz omitted; 50 ms linear release to 0 at the end (M1 review fix: the note was cut while still sounding, a click); normalised to peak 1.
+- Delivery headroom (FR-109): `true_peak(buf)` interpolates each channel 8× by FFT in 65 536-sample blocks with 4 096 samples of context per side (edge error ≈ 1e-4; 0.6 s per 60 s stereo); `limit_true_peak(buf, peak_dbfs=…)` scales the buffer by `ceiling / true_peak` only when the true peak is above `10 ** (peak_dbfs / 20)`. `Scene.render` applies it before `write_wav`. It is separate from `mix()` so the mix keeps its exact sample-peak contract (NFR-103) and stays FFT-free; numpy's FFT is deterministic for a fixed machine and numpy version. A windowed-sinc FIR (BS.1770 style) was tried and under-read saturated onsets by ~2 %.
 
 ### M1.7 Export (FR-109)
 
@@ -355,7 +356,7 @@ Scene.render(out):
     else:
         with tempfile.TemporaryDirectory(dir=out.parent) as tmp:
             encode frames -> tmp/video.mp4 (FfmpegWriter, unchanged)
-            write_wav(tmp/audio.wav, self.audio_buffer())
+            write_wav(tmp/audio.wav, limit_true_peak(self.audio_buffer(), peak_dbfs=…))
             mux(tmp/video.mp4, tmp/audio.wav, out)
 mux: ffmpeg -hide_banner -loglevel error -y -i VIDEO -i WAV -map 0:v:0 -map 1:a:0
      -c:v copy -c:a aac -b:a 192k -ar 48000 -ac 2 -movflags +faststart

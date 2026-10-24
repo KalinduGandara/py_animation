@@ -139,3 +139,18 @@ def test_readme_documents_audio() -> None:
     text = (EXAMPLE.parent.parent / "README.md").read_text()
     for word in ("on_collision", "S.scale", "A.play", "AudioConfig"):
         assert word in text
+
+
+def test_bounce_notes_aac_does_not_clip(tmp_path: Path) -> None:
+    # review finding: seed 42, 8 s decoded to a peak of 1.0288 (+0.25 dBFS)
+    import numpy as np
+
+    out = tmp_path / "bn.mp4"
+    assert main(["render", str(NOTES), "--seed", "42", "--duration", "8", "--out", str(out)]) == 0
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(out), "-map", "0:a:0", "-f", "f32le", "-"],
+        capture_output=True, check=True,
+    ).stdout  # fmt: skip
+    pcm = np.frombuffer(raw, dtype=np.float32)
+    assert len(pcm) > 0
+    assert float(np.abs(pcm).max()) < 1.0

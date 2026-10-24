@@ -184,3 +184,38 @@ def test_mix_with_every_voice_is_deterministic() -> None:
     a = mix(trigs, length=SAMPLE_RATE, config=AudioConfig(), seed=1)
     b = mix(trigs, length=SAMPLE_RATE, config=AudioConfig(), seed=1)
     assert np.array_equal(a, b)
+
+
+# --- review fixes (FR-105, FR-107) ---
+
+
+def _true_peak(y: NDArray[np.float64]) -> float:
+    """Peak of the band-limited signal, by 8x FFT interpolation (zero-padded, no wrap)."""
+    n = len(y)
+    padded = np.concatenate([y, np.zeros(n)])
+    return float(np.abs(np.fft.irfft(np.fft.rfft(padded), 8 * n) * 4).max())
+
+
+@pytest.mark.parametrize("hz", [261.63, 523.25, 1046.5, 2093.0, 2637.02])
+def test_pluck_in_tune_up_to_e7(hz: float) -> None:
+    # integer delay lines alone are +14 cents at C6 and +33 cents at C7
+    cents = 1200 * np.log2(_fundamental_hz(Pluck().render(hz, 42)) / hz)
+    assert abs(cents) < 5.0
+
+
+@pytest.mark.parametrize("voice", [Pluck(), Marimba()], ids=["pluck", "marimba"])
+@pytest.mark.parametrize("hz", [130.81, 261.63, 440.0])
+def test_decaying_voices_release_to_zero(voice: object, hz: float) -> None:
+    # notes are cut at a fixed duration; without a release this is a step (a click)
+    y = voice.render(hz, 42)  # type: ignore[attr-defined]
+    assert y[-1] == 0.0
+    assert float(np.abs(y[-48:]).max()) < 5e-3  # last 1 ms
+    assert float(np.abs(np.diff(y[-480:])).max()) < 0.01  # no step in the last 10 ms
+
+
+@pytest.mark.parametrize("voice", ALL_VOICES, ids=IDS)
+@pytest.mark.parametrize("hz", [130.81, 261.63, 1046.5, 2093.0])
+def test_true_peak_close_to_sample_peak(voice: object, hz: float) -> None:
+    # full-band excitation had a true peak 1.43x its sample peak (AAC overshoot)
+    y = voice.render(hz, 42)  # type: ignore[attr-defined]
+    assert _true_peak(y) <= 1.06

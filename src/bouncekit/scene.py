@@ -11,7 +11,13 @@ import pymunk
 from numpy.typing import NDArray
 
 from bouncekit.actions import Play
-from bouncekit.audio.mixer import NoteTrigger, mix, num_samples, sample_offset
+from bouncekit.audio.mixer import (
+    NoteTrigger,
+    limit_true_peak,
+    mix,
+    num_samples,
+    sample_offset,
+)
 from bouncekit.colors import ColorLike
 from bouncekit.config import AudioConfig, SceneConfig, Vec
 from bouncekit.errors import ConfigError
@@ -339,8 +345,9 @@ class Scene:
         """Simulate and encode the whole scene to an H.264 MP4 at ``out``.
 
         Parent directories are created. ffmpeg is checked before simulating. If the
-        scene has sound rules, the mix is muxed in as 48 kHz stereo AAC; otherwise
-        the MP4 has no audio stream.
+        scene has sound rules, the mix is limited to a true peak of
+        ``audio.peak_dbfs`` and muxed in as 48 kHz stereo AAC; otherwise the MP4 has
+        no audio stream.
 
         Raises:
             FfmpegError: if ffmpeg is missing or fails.
@@ -359,7 +366,8 @@ class Scene:
             with FfmpegWriter(video, cfg.width, cfg.height, cfg.fps) as writer:
                 for frame in self.frames():
                     writer.write(frame)
-            write_wav(wav, self.audio_buffer())
+            # mix() normalises the sample peak; AAC needs true-peak headroom too.
+            write_wav(wav, limit_true_peak(self.audio_buffer(), peak_dbfs=cfg.audio.peak_dbfs))
             mux(video, wav, path)
         return path
 

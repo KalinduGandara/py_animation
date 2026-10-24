@@ -117,3 +117,44 @@ def test_scene_audio_buffer_length_follows_simulated_frames() -> None:
     assert buf.shape == (num_samples(3, 7), 2)
     assert buf.dtype == np.float32
     assert not buf.any()
+
+
+# --- review fix: true-peak headroom for lossy delivery (FR-107, FR-109) ---
+
+
+def _fft_true_peak(y: np.ndarray) -> float:
+    n = len(y)
+    padded = np.concatenate([np.asarray(y, dtype=np.float64), np.zeros(n)])
+    return float(np.abs(np.fft.irfft(np.fft.rfft(padded), 8 * n) * 4).max())
+
+
+def test_true_peak_matches_fft_interpolation() -> None:
+    from bouncekit.audio.mixer import true_peak
+
+    trigs = [_trig(100 + i, hz=200.0 + 7 * i) for i in range(200)]
+    buf = mix(trigs, length=SAMPLE_RATE, config=AudioConfig(), seed=0)
+    ref = _fft_true_peak(buf[:, 0])
+    assert ref > 1.0  # tanh saturation overshoots between samples
+    assert true_peak(buf) == pytest.approx(ref, rel=1e-3)
+    assert true_peak(np.zeros((0, 2), dtype=np.float32)) == 0.0
+
+
+def test_limit_true_peak_scales_only_when_over_ceiling() -> None:
+    from bouncekit.audio.mixer import limit_true_peak, true_peak
+
+    dense = mix(
+        [_trig(100 + i, hz=200.0 + 7 * i) for i in range(200)],
+        length=SAMPLE_RATE, config=AudioConfig(), seed=0,
+    )  # fmt: skip
+    out = limit_true_peak(dense, peak_dbfs=-1.0)
+    assert out.dtype == np.float32 and out.shape == dense.shape
+    assert true_peak(out) <= PEAK * (1 + 1e-6)
+    assert _fft_true_peak(out[:, 0]) <= PEAK * 1.01
+    quiet = mix([_trig(0, gain=0.01)], length=SAMPLE_RATE, config=AudioConfig(), seed=0)
+    limited = limit_true_peak(quiet, peak_dbfs=-1.0)  # a plain sine: near-transparent
+    assert true_peak(limited) <= PEAK * (1 + 1e-6)
+    assert float(np.abs(limited).max()) >= PEAK * 0.999
+    already = (quiet * 0.5).astype(np.float32)  # under the ceiling: same object back
+    assert limit_true_peak(already, peak_dbfs=-1.0) is already
+    silent = np.zeros((480, 2), dtype=np.float32)
+    assert not limit_true_peak(silent, peak_dbfs=-1.0).any()

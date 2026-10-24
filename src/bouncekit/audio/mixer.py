@@ -14,13 +14,25 @@ from numpy.typing import NDArray
 from bouncekit.audio.voices import SAMPLE_RATE, Voice
 from bouncekit.config import AudioConfig
 
-__all__ = ["NOTE_LEVEL", "SAMPLE_RATE", "NoteTrigger", "mix", "num_samples", "sample_offset"]
+__all__ = [
+    "NOTE_LEVEL",
+    "SAMPLE_RATE",
+    "NoteTrigger",
+    "limit_true_peak",
+    "mix",
+    "num_samples",
+    "sample_offset",
+    "true_peak",
+]
 
 NOTE_LEVEL = 0.5
 """Level of a full-gain note before the master bus."""
 
 _END_FADE = SAMPLE_RATE * 5 // 1000  # 5 ms
 _STEAL_FADE = SAMPLE_RATE * 5 // 1000  # 5 ms
+_TP_OVERSAMPLE = 8
+_TP_BLOCK = 1 << 16  # samples measured per FFT block
+_TP_MARGIN = 1 << 12  # context on each side of a block (edge error ~ 1 / (pi * margin))
 
 
 @dataclass(frozen=True)
@@ -103,3 +115,44 @@ def mix(
     stereo[:, 0] = out
     stereo[:, 1] = out
     return stereo
+
+
+def true_peak(buffer: NDArray[np.floating]) -> float:
+    """Peak of the band-limited signal between samples (8x oversampled), all channels.
+
+    This is the level a lossy codec or a DAC reconstructs; it can exceed the
+    sample peak by several dB for noisy transients or saturated mixes. Measured by
+    FFT interpolation of overlapping blocks (zeros outside the buffer).
+    """
+    data = np.asarray(buffer, dtype=np.float64)
+    if data.size == 0:
+        return 0.0
+    if data.ndim == 1:
+        data = data[:, None]
+    peak = float(np.abs(data).max())
+    n = data.shape[0]
+    up = _TP_OVERSAMPLE
+    for ch in range(data.shape[1]):
+        padded = np.concatenate([np.zeros(_TP_MARGIN), data[:, ch], np.zeros(_TP_MARGIN)])
+        for start in range(0, n, _TP_BLOCK):
+            size = min(_TP_BLOCK, n - start)
+            seg = padded[start : start + size + 2 * _TP_MARGIN]
+            fine = np.fft.irfft(np.fft.rfft(seg), up * len(seg)) * up
+            centre = fine[up * _TP_MARGIN : up * (_TP_MARGIN + size)]
+            peak = max(peak, float(np.abs(centre).max()))
+    return peak
+
+
+def limit_true_peak(buffer: NDArray[np.float32], *, peak_dbfs: float) -> NDArray[np.float32]:
+    """Return ``buffer`` scaled so its :func:`true_peak` is at most ``peak_dbfs``.
+
+    Used before lossy (AAC) encoding: :func:`mix` normalises the sample peak, and a
+    sample peak of -1 dBFS can still decode above full scale. Buffers already under
+    the ceiling are returned as is (same object).
+    """
+    ceiling = 10 ** (peak_dbfs / 20)
+    tp = true_peak(buffer)
+    if tp <= ceiling:
+        return buffer
+    out: NDArray[np.float32] = (buffer.astype(np.float64) * (ceiling / tp)).astype(np.float32)
+    return out

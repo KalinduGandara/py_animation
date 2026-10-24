@@ -120,6 +120,7 @@ Scope: **Milestone M1 only**: event log, synth voices, single-note and scale sou
 
 ### FR-105 Voices — [Audio]
 - THE SYSTEM SHALL provide voices as frozen dataclasses: `Sine` and `Triangle` (with an `ADSR` envelope), `Pluck` (Karplus-Strong), `Marimba` (decaying inharmonic partials). Each has a fixed `duration` in seconds, and each `render(hz, seed)` returns mono float64 samples at 48 kHz with peak ≤ 1.0 and a first sample of 0.0.
+- `Pluck` SHALL be in tune within 5 cents from C4 to E7, and its excitation SHALL be band-limited so its true (inter-sample) peak stays within 6 % of its sample peak. `Pluck` and `Marimba` SHALL fade linearly to exactly 0.0 over their last 50 ms, so a note cut at its duration does not click. (Added 2026-10-24 after M1 review: integer delay lines played C7 +33 cents; full-band noise had a true peak 1.43× its sample peak; both voices ended with a step.)
 - `Pluck` noise SHALL come from `numpy.random.default_rng` seeded from `(scene seed, voice parameters, pitch)` only, so equal inputs give bit-identical output (B4).
 - WHEN a voice parameter is out of range (non-positive duration, negative envelope time, sustain outside [0, 1], damping outside (0, 1)), THE SYSTEM SHALL raise `ConfigError` naming the field.
 - Rendered notes SHALL be cached per `(voice, hz, seed)` for the scene's mix.
@@ -144,6 +145,7 @@ Scope: **Milestone M1 only**: event log, synth voices, single-note and scale sou
 
 ### FR-109 Export with audio — [Stack], [Arch], [M1]
 - WHEN a scene has at least one sound rule, `render` SHALL encode the video as in FR-007 to a temporary file, write the mix as a 32-bit float WAV with `soundfile`, and mux with ffmpeg: video stream copied, audio AAC 192 kb/s, 48 000 Hz, 2 channels, `+faststart`. Temporary files SHALL be removed, also on failure.
+- Before writing the WAV, THE SYSTEM SHALL scale the mix down, only if needed, so its 8× oversampled true peak is ≤ `peak_dbfs` (`limit_true_peak`), so the decoded AAC track does not exceed full scale. `scene.audio_buffer()` is unchanged (sample-peak normalised, FR-107). (Added 2026-10-24 after M1 review: a −1 dBFS sample peak decoded to +0.25 dBFS.)
 - WHEN a scene has no sound rules, THE SYSTEM SHALL write a video-only MP4 exactly as in M0 (no audio stream) (B11).
 - WHEN ffmpeg fails during muxing, THE SYSTEM SHALL raise `FfmpegError` with the stderr tail.
 
