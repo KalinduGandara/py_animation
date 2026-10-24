@@ -135,6 +135,8 @@ class ActionContext:
         elasticity: float = 1.0,
         constant_speed: bool = False,
         max_total: int | None = None,
+        trail: bool = False,
+        glow: float | bool = 0.0,
     ) -> None:
         """Queue ``count`` new balls; options and refusal rules as ``A.spawn`` (FR-207).
 
@@ -155,6 +157,8 @@ class ActionContext:
                 elasticity=elasticity,
                 constant_speed=constant_speed,
                 max_total=max_total,
+                trail=trail,
+                glow=glow,
             )
         )
 
@@ -177,6 +181,8 @@ class ActionContext:
                     action.tags,
                     action.elasticity,
                     action.constant_speed,
+                    action.trail,
+                    action.glow,
                 )
             )
         self.scene._queue.append(SpawnCmd(tuple(specs), action.max_total))

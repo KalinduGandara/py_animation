@@ -9,13 +9,14 @@ from bouncekit.colors import Color, ColorLike, parse_color
 from bouncekit.config import (
     Vec,
     _finite_number,
+    _glow,
     _non_negative_number,
     _positive_number,
     _tags,
     _vec,
 )
 from bouncekit.errors import ConfigError
-from bouncekit.render.base import Renderer
+from bouncekit.render.base import GlowArc, Renderer
 
 
 class CircleBoundary:
@@ -41,6 +42,7 @@ class CircleBoundary:
         segments: int = 128,
         elasticity: float = 1.0,
         tags: Iterable[str] = (),
+        glow: float | bool = 0.0,
     ) -> None:
         """Validate the options, build the segments and add them to ``space``.
 
@@ -60,6 +62,7 @@ class CircleBoundary:
         elasticity_value = _non_negative_number("elasticity", elasticity)
         self._color = parse_color(color)
         self._tags = _tags(tags)
+        glow_value = _glow(glow)
 
         self.body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         self.body.position = position
@@ -69,6 +72,8 @@ class CircleBoundary:
         space.add(self.body, *self.shapes)
         self.alive: bool = True
         """``False`` once the ring has been destroyed (removed from its scene)."""
+        self.glow: float = glow_value
+        """Glow intensity in [0, 4], 0 = no glow (FR-304); visual only."""
 
     def _build_segments(self, n: int, elasticity: float) -> list[pymunk.Segment]:
         angles = [2 * math.pi * k / n for k in range(n)]
@@ -141,16 +146,32 @@ class CircleBoundary:
         The arc spans the present segments' end points, so the drawn gap matches the
         physics gap (the chord polygon is within a fraction of a pixel of the arc).
         """
-        if not self.shapes:
+        arc = self._arc_degrees()
+        if arc is None:
             return
+        drawn = self._color if color is None else color
+        renderer.arc(self.center, self._radius, self._thickness, arc[0], arc[1], drawn)
+
+    def glow_light(self, color: Color) -> GlowArc | None:
+        """The light this ring adds to the glow layer: its drawn arc in ``color`` (FR-304).
+
+        ``None`` when the ring has no segments left to draw.
+        """
+        arc = self._arc_degrees()
+        if arc is None:
+            return None
+        return GlowArc(self.center, self._radius, self._thickness, arc[0], arc[1], color, self.glow)
+
+    def _arc_degrees(self) -> tuple[float, float] | None:
+        """Start and end angle of the drawn arc in degrees, or ``None`` if empty."""
+        if not self.shapes:
+            return None
         rotation = math.degrees(self.body.angle)
         if len(self.shapes) == self._segment_count:
-            start, end = rotation, rotation + 360.0
-        else:
-            first, last = self.shapes[0].a, self.shapes[-1].b
-            start = rotation + math.degrees(math.atan2(first.y, first.x)) % 360
-            end = rotation + math.degrees(math.atan2(last.y, last.x)) % 360
-            if end <= start:
-                end += 360.0
-        drawn = self._color if color is None else color
-        renderer.arc(self.center, self._radius, self._thickness, start, end, drawn)
+            return rotation, rotation + 360.0
+        first, last = self.shapes[0].a, self.shapes[-1].b
+        start = rotation + math.degrees(math.atan2(first.y, first.x)) % 360
+        end = rotation + math.degrees(math.atan2(last.y, last.x)) % 360
+        if end <= start:
+            end += 360.0
+        return start, end

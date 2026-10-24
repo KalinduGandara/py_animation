@@ -6,7 +6,15 @@ from collections.abc import Iterable
 import pymunk
 
 from bouncekit.colors import Color, ColorLike, parse_color
-from bouncekit.config import Vec, _non_negative_number, _positive_number, _tags, _vec
+from bouncekit.config import (
+    Vec,
+    _glow,
+    _non_negative_number,
+    _positive_number,
+    _tags,
+    _trail,
+    _vec,
+)
 from bouncekit.render.base import Renderer
 
 
@@ -29,6 +37,8 @@ class Ball:
         elasticity: float = 1.0,
         color: ColorLike = "#ffffff",
         tags: Iterable[str] = (),
+        trail: bool = False,
+        glow: float | bool = 0.0,
     ) -> None:
         """Validate the options, create the body and shape, and add them to ``space``.
 
@@ -41,6 +51,8 @@ class Ball:
         elasticity_value = _non_negative_number("elasticity", elasticity)
         self._color = parse_color(color)
         self._tags = _tags(tags)
+        trail_value = _trail(trail)
+        glow_value = _glow(glow)
 
         mass = math.pi * self._radius**2
         self.body = pymunk.Body(mass, pymunk.moment_for_circle(mass, 0, self._radius))
@@ -58,6 +70,10 @@ class Ball:
         """Whether the scene rescales the velocity to ``target_speed`` after every step (FR-212)."""
         self.target_speed: float = 0.0
         """Speed held in constant-speed mode (initial ``|velocity|``, updated by set_velocity)."""
+        self.trail: bool = trail_value
+        """Whether the ball leaves a fading trail (FR-303); visual only."""
+        self.glow: float = glow_value
+        """Glow intensity in [0, 4], 0 = no glow (FR-304); visual only."""
 
     def set_radius(self, radius: float) -> None:
         """Change the radius, keeping density 1 (mass = pi * r^2, moment updated).

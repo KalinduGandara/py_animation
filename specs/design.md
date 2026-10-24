@@ -827,6 +827,16 @@ class Effects:
 - Colour resolution at ball creation (`add_ball`, `Scene._spawn_ball` for spawn/split): `Fixed` → its colour; `HueCycle` → `hsv(...)` with `hue_index[mode]` then increment; dynamic modes → stored in `ball.color_mode` with base colour = the mode's value at creation. `Ball.color` returns `mode.evaluate(ball)` when `color_mode` is set. `recolor` with a mode resolves the same way (dynamic → sets `color_mode`; fixed/hue → clears it).
 - Split: child 0 (the parent) keeps its colour/mode. Each ball remembers `hue_mode: HueCycle | None` (the mode it was created/recoloured with); a new child gets `parent.color_mode` if dynamic, else the next hue of `parent.hue_mode` if set, else the parent's colour. Spawn: colour value/mode resolved per ball at apply time; a refused command resolves nothing (FR-306).
 
+### M3.4a Implementation notes (T-301)
+
+- `Effects` (render/effects.py) holds only the trail bookkeeping so far (`trail_pos`, `trail_frame`, plus `trail_active`); particles and hue cursors arrive with T-302. `Effects.trail_update(balls, frame, keep)` returns the `trails(...)` arguments or `None`.
+- On `reset=True` (first draw or skipped frames) previous positions are discarded, so every trail ball contributes a dot (no stale long strokes).
+- Deviation: after the last live trail ball is destroyed, `trails([], keep, reset=False)` keeps being called until the FR-302 fade bound (`ceil(log(1/255)/log(keep)) + 255` frames since the last frame with a trail ball) has passed, so existing trails fade out instead of vanishing; after that the step is skipped again. Scenes that never use trails never call it (NFR-304 unchanged).
+- Deviation: `GlowArc` is drawn on the quarter-res layer with the renderer's own SDF arc (`_arc(..., target=layer)`, same geometry as `Renderer.arc`, anti-aliased) instead of `pygame.draw.arc`, whose thick arcs have pixel holes; cost at quarter resolution is < 1 ms. `GlowDisc` uses `pygame.draw.circle` (radius `max(1, r/4)`).
+- `CircleBoundary.glow_light(color)` returns `None` for a ring with no segments; ring arc angles come from a shared `_arc_degrees()` used by `draw` too.
+- `_fill_distance(..., alpha=, target=)`: alpha scales coverage only when `alpha != 1.0`; `circle(alpha <= 0)` draws nothing.
+- Measured (dev machine, `tests/test_perf.py`): 100 trail + glow balls + glowing ring at 1080×1920 ≈ 39 ms/frame median.
+
 ### M3.5 PygameRenderer additions (FR-302, NFR-303)
 
 - `_fill_distance(..., alpha=1.0, target=None)`: coverage × alpha; `target` defaults to the frame surface (lets trails reuse the SDF code on the trail layer). `circle(..., alpha)` passes it through; `alpha == 1.0` keeps the exact M2 arithmetic (no extra multiply), so existing bytes are unchanged.

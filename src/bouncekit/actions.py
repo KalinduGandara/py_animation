@@ -18,10 +18,12 @@ from bouncekit.colors import Color, ColorLike, parse_color
 from bouncekit.config import (
     Vec,
     _finite_number,
+    _glow,
     _non_negative_number,
     _positive_int,
     _positive_number,
     _tags,
+    _trail,
     _vec,
 )
 from bouncekit.errors import ConfigError
@@ -132,6 +134,8 @@ class Spawn:
     elasticity: float = 1.0
     max_total: int | None = None
     constant_speed: bool = False
+    trail: bool = False
+    glow: float = 0.0
 
     def run(self, ctx: "ActionContext") -> None:
         """Evaluate the values now (in ball order) and queue the new balls."""
@@ -325,6 +329,8 @@ def spawn(
     elasticity: float = 1.0,
     constant_speed: bool = False,
     max_total: int | None = None,
+    trail: bool = False,
+    glow: float | bool = 0.0,
 ) -> Spawn:
     """Return an action that adds ``count`` balls of ``radius`` (FR-207).
 
@@ -340,12 +346,14 @@ def spawn(
 
     With ``constant_speed=True`` each ball keeps its initial speed (FR-212, see
     ``Scene.add_ball``); that speed must be > 0 and <= ``config.max_speed``.
+    ``trail`` and ``glow`` are the visual options of ``Scene.add_ball`` (FR-303, FR-304).
 
     Raises:
         ConfigError: for an invalid value (a callable's result is checked when it
             is evaluated), a non-positive ``radius`` or ``count``, a bad
-            ``max_total``, or ``constant_speed`` with a zero speed (a speed above
-            ``max_speed`` raises when the rule runs).
+            ``max_total``, ``constant_speed`` with a zero speed (a speed above
+            ``max_speed`` raises when the rule runs), a non-bool ``trail`` or a
+            ``glow`` outside [0, 4].
     """
     _positive_int("count", count)
     _bool("constant_speed", constant_speed)
@@ -361,6 +369,8 @@ def spawn(
         elasticity=_non_negative_number("elasticity", elasticity),
         max_total=_max_total(max_total),
         constant_speed=constant_speed,
+        trail=_trail(trail),
+        glow=_glow(glow),
     )
 
 

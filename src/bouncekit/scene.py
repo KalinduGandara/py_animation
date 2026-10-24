@@ -23,6 +23,7 @@ from bouncekit.audio.mixer import (
 from bouncekit.colors import Color, ColorLike
 from bouncekit.config import (
     AudioConfig,
+    EffectsConfig,
     SceneConfig,
     Vec,
     _non_negative_number,
@@ -33,7 +34,8 @@ from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
 from bouncekit.export.audio import write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
-from bouncekit.render.base import Renderer
+from bouncekit.render.base import GlowArc, GlowDisc, Renderer
+from bouncekit.render.effects import Effects, TrailBall
 from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.rules.commands import BallSpec, Command, apply
 from bouncekit.rules.engine import SUBJECTS, Rule, RuleEngine, RuleKind
@@ -78,13 +80,15 @@ class Scene:
         audio: AudioConfig | None = None,
         rule_cooldown: float = 0.05,
         max_balls: int = 1000,
+        effects: EffectsConfig | None = None,
     ) -> None:
         """Validate the settings and create an empty world.
 
         ``audio`` defaults to ``AudioConfig()``. ``rule_cooldown`` is the default
         per-pair cooldown of collision rules in seconds (see :meth:`on_collision`).
         ``max_balls`` caps the live balls: ``add_ball`` beyond it raises, and splits or
-        spawns beyond it are refused at runtime.
+        spawns beyond it are refused at runtime. ``effects`` defaults to
+        ``EffectsConfig()`` (trail length, glow blur, particle cap).
 
         Raises:
             ConfigError: if any setting is invalid.
@@ -102,10 +106,14 @@ class Scene:
             "audio": AudioConfig() if audio is None else audio,
             "rule_cooldown": rule_cooldown,
             "max_balls": max_balls,
+            "effects": EffectsConfig() if effects is None else effects,
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
         self.rng: random.Random = random.Random(self.config.seed)
+        self.fx_rng: random.Random = random.Random(f"bouncekit-fx:{self.config.seed}")
+        """Random stream for visual effects only (FR-301); never affects physics."""
+        self._fx = Effects()  # effect state, drawing only (FR-301)
         self.frame: int = 0
         # Frame of the latest simulated step: event ``frame`` for commands applied
         # after the frame (``when`` rules) as well as during it (FR-201).
@@ -578,6 +586,8 @@ class Scene:
             elasticity=spec.elasticity,
             color=spec.color,
             tags=spec.tags,
+            trail=spec.trail,
+            glow=spec.glow,
         )
         ball.generation = generation
         if spec.constant_speed:
@@ -630,10 +640,13 @@ class Scene:
         segments: int = 128,
         elasticity: float = 1.0,
         tags: Iterable[str] = (),
+        glow: float | bool = 0.0,
     ) -> CircleBoundary:
         """Add a ring boundary; see :class:`CircleBoundary`.
 
         ``angular_velocity`` is in degrees per second, positive = clockwise.
+        ``glow`` (0..4, or a bool for 1/0) adds a blurred light along the drawn arc,
+        in the colour the ring is drawn in (FR-304); visual only.
 
         Raises:
             ConfigError: if any option is invalid, or a ball at ``max_speed`` could
@@ -650,6 +663,7 @@ class Scene:
             segments=segments,
             elasticity=elasticity,
             tags=tags,
+            glow=glow,
         )
         for ball in self._balls:
             self._check_tunnelling(ball, ring)
@@ -667,12 +681,19 @@ class Scene:
         color: ColorLike = "#ffffff",
         tags: Iterable[str] = (),
         constant_speed: bool = False,
+        trail: bool = False,
+        glow: float | bool = 0.0,
     ) -> Ball:
         """Add a dynamic ball; its speed is clamped to ``config.max_speed``.
 
         With ``constant_speed=True``, after every step (after the clamp) the velocity
         is rescaled to the initial speed ``|velocity|`` (``ball.target_speed``),
         keeping its direction; a zero velocity stays zero (FR-212).
+
+        Visual only (FR-303, FR-304): ``trail=True`` leaves a fading trail of the
+        ball's diameter (length ``effects.trail_seconds``); ``glow`` (0..4, or a bool
+        for 1/0) adds a blurred light in the ball's drawn colour. Split children and
+        spawned balls inherit both from their parent.
 
         Raises:
             ConfigError: if any option is invalid, the scene already has
@@ -698,6 +719,8 @@ class Scene:
             elasticity=elasticity,
             color=color,
             tags=tags,
+            trail=trail,
+            glow=glow,
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
@@ -792,21 +815,46 @@ class Scene:
         self.space.use_spatial_hash(dim, SPATIAL_HASH_COUNT)
 
     def draw(self, renderer: Renderer) -> None:
-        """Draw the background and every live object, in insertion order.
+        """Draw the background, trails, every live object and glows (FR-303, FR-304).
 
-        An object flashing at the current frame (``A.flash``) is drawn in its flash
-        colour blended linearly back to its base colour. Drawing only reads world
-        state; it never changes the simulation.
+        Order: background; the trail layer (only while a ball has ``trail``); objects
+        in insertion order; the glow layer (only while an object has ``glow``). An
+        object flashing at the current frame (``A.flash``) is drawn, and glows, in its
+        flash colour blended linearly back to its base colour. Drawing never changes
+        the simulation; it only updates effect state keyed on ``frame``, so redrawing
+        a frame gives the same image.
         """
         renderer.clear(self.config.background)
+        effects = self.config.effects
+        fx = self._fx
+        indices = self._indices
+        trail_balls: list[TrailBall] = [
+            (indices[b], b.position, b.radius, b.color) for b in self._balls if b.trail
+        ]
+        if trail_balls or fx.trail_active is not None:
+            update = fx.trail_update(trail_balls, self.frame, effects.trail_keep(self.config.fps))
+            if update is not None:
+                segments, keep, reset = update
+                renderer.trails(segments, keep=keep, reset=reset)
         flashes = self._flash
+        lights: list[GlowDisc | GlowArc] = []
         for obj in self._objects:
             color: Color | None = None
             if flashes:
-                state = flashes.get(self._indices[obj])
+                state = flashes.get(indices[obj])
                 if state is not None:
                     color = _flash_color(state, obj.color, self.frame)
             obj.draw(renderer, color)
+            if obj.glow > 0:
+                drawn = obj.color if color is None else color
+                if isinstance(obj, Ball):
+                    lights.append(GlowDisc(obj.position, obj.radius, drawn, obj.glow))
+                else:
+                    light = obj.glow_light(drawn)
+                    if light is not None:
+                        lights.append(light)
+        if lights:
+            renderer.glow(lights, blur=effects.glow_blur)
 
     def frames(self) -> Iterator[bytes]:
         """Yield each remaining frame as RGB24 bytes, then advance one frame.

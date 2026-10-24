@@ -6,7 +6,7 @@ import os
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from bouncekit import actions, colors, sound
-from bouncekit.config import AudioConfig
+from bouncekit.config import AudioConfig, EffectsConfig
 from bouncekit.errors import ConfigError
 from bouncekit.scene import Scene
 from bouncekit.world.ball import Ball
@@ -19,6 +19,7 @@ __all__ = [
     "Ball",
     "CircleBoundary",
     "ConfigError",
+    "EffectsConfig",
     "Scene",
     "__version__",
     "actions",

@@ -63,6 +63,8 @@ class BallSpec:
     tags: frozenset[str]
     elasticity: float
     constant_speed: bool = False
+    trail: bool = False
+    glow: float = 0.0
 
 
 @dataclass(frozen=True, eq=False)
@@ -178,7 +180,15 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
     parent.generation += 1
     for pos, vel in states[1:]:
         spec = BallSpec(
-            pos, r2, vel, parent.color, parent.tags, parent.shape.elasticity, parent.constant_speed
+            pos,
+            r2,
+            vel,
+            parent.color,
+            parent.tags,
+            parent.shape.elasticity,
+            parent.constant_speed,
+            parent.trail,
+            parent.glow,
         )
         child = scene._spawn_ball(spec, generation=parent.generation)
         scene._inherit(parent, child)

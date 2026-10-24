@@ -9,6 +9,9 @@ from bouncekit.errors import ConfigError
 
 Vec = tuple[float, float]
 
+MAX_GLOW = 4.0
+"""Largest accepted glow intensity (FR-304)."""
+
 
 def _positive_int(name: str, value: object) -> None:
     if type(value) is not int or value <= 0:
@@ -42,6 +45,22 @@ def _non_negative_number(name: str, value: object) -> float:
     if number < 0:
         raise ConfigError(f"{name} must be a non-negative finite number; got {value!r}")
     return number
+
+
+def _glow(value: object) -> float:
+    """Validate a glow intensity: a number in [0, 4] or a bool (True = 1.0)."""
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if not isinstance(value, int | float) or not math.isfinite(value) or not 0 <= value <= MAX_GLOW:
+        raise ConfigError(f"glow must be a number in [0, {MAX_GLOW:g}] or a bool; got {value!r}")
+    return float(value)
+
+
+def _trail(value: object) -> bool:
+    """Validate a trail flag (a bool)."""
+    if type(value) is not bool:
+        raise ConfigError(f"trail must be True or False; got {value!r}")
+    return value
 
 
 def _vec(name: str, value: object) -> Vec:
@@ -112,13 +131,44 @@ class AudioConfig:
 
 
 @dataclass(frozen=True)
+class EffectsConfig:
+    """Visual effect settings for a scene (FR-303..FR-305); effects never change physics.
+
+    Raises ``ConfigError`` naming the field for a non-positive or non-finite
+    ``trail_seconds``/``glow_blur`` or a ``max_particles`` that is not an int >= 0.
+
+    Attributes:
+        trail_seconds: seconds after which a trail has faded to 5 %.
+        glow_blur: blur radius of glows in pixels (at full resolution).
+        max_particles: cap on live impact particles; bursts beyond it are truncated.
+    """
+
+    trail_seconds: float = 0.3
+    glow_blur: float = 18.0
+    max_particles: int = 2000
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "trail_seconds", _positive_number("trail_seconds", self.trail_seconds)
+        )
+        object.__setattr__(self, "glow_blur", _positive_number("glow_blur", self.glow_blur))
+        if type(self.max_particles) is not int or self.max_particles < 0:
+            raise ConfigError(f"max_particles must be an integer >= 0; got {self.max_particles!r}")
+
+    def trail_keep(self, fps: int) -> float:
+        """Per-frame trail decay factor ``0.05 ** (1 / (trail_seconds * fps))``."""
+        return float(0.05 ** (1 / (self.trail_seconds * fps)))
+
+
+@dataclass(frozen=True)
 class SceneConfig:
     """Immutable, validated scene settings (pixels, origin top-left, +y down).
 
     ``background`` accepts a colour string or tuple and is stored as an RGB tuple.
     ``audio`` holds the sound settings (:class:`AudioConfig`). ``rule_cooldown`` is
     the default per-pair cooldown of collision rules in seconds (FR-204).
-    ``max_balls`` caps the number of live balls (FR-205).
+    ``max_balls`` caps the number of live balls (FR-205). ``effects`` holds the
+    visual effect settings (:class:`EffectsConfig`).
     """
 
     width: int = 1080
@@ -133,8 +183,11 @@ class SceneConfig:
     audio: AudioConfig = field(default_factory=AudioConfig)
     rule_cooldown: float = 0.05
     max_balls: int = 1000
+    effects: EffectsConfig = field(default_factory=EffectsConfig)
 
     def __post_init__(self) -> None:
+        if not isinstance(self.effects, EffectsConfig):
+            raise ConfigError(f"effects must be an EffectsConfig; got {self.effects!r}")
         if not isinstance(self.audio, AudioConfig):
             raise ConfigError(f"audio must be an AudioConfig; got {self.audio!r}")
         _positive_even_int("width", self.width)
