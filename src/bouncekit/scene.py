@@ -2,11 +2,13 @@
 
 import random
 from collections.abc import Iterable, Iterator
+from pathlib import Path
 
 import pymunk
 
 from bouncekit.colors import ColorLike
 from bouncekit.config import SceneConfig, Vec
+from bouncekit.export.ffmpeg import FfmpegWriter, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.world.ball import Ball
@@ -168,3 +170,20 @@ class Scene:
             self.draw(renderer)
             yield renderer.to_rgb_bytes()
             self.step_frame()
+
+    def render(self, out: str | Path) -> Path:
+        """Simulate and encode the whole scene to an H.264 MP4 at ``out``.
+
+        Parent directories are created. ffmpeg is checked before simulating.
+
+        Raises:
+            FfmpegError: if ffmpeg is missing or fails.
+        """
+        require_ffmpeg()
+        path = Path(out)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        cfg = self.config
+        with FfmpegWriter(path, cfg.width, cfg.height, cfg.fps) as writer:
+            for frame in self.frames():
+                writer.write(frame)
+        return path

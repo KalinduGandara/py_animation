@@ -22,7 +22,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: render/base.py, render/pygame_renderer.py, scene.py, world/*.py (draw), tests/test_render.py, tests/test_determinism.py
   - Done when: frame size/pixel colour tests, render-doesn't-mutate-physics test, same-seed identical hashes, different-seed differing hashes all pass.
 
-- [ ] T-005: ffmpeg export — `require_ffmpeg`, `FfmpegWriter`, `Scene.render`.
+- [x] T-005: ffmpeg export — `require_ffmpeg`, `FfmpegWriter`, `Scene.render`.
   - Requirements: FR-007, NFR-002
   - Files: export/ffmpeg.py, scene.py, tests/test_export.py
   - Done when: tiny real encode probes as h264/yuv420p with right size+fps; missing-ffmpeg and bad-frame-length errors tested.
