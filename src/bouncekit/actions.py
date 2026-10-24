@@ -1,4 +1,4 @@
-"""Built-in rule actions (FR-104, FR-206, FR-207): play, destroy, split, spawn.
+"""Built-in rule actions (FR-104, FR-206, FR-207, FR-209): play, destroy, split, spawn, end_after.
 
 Actions are immutable values compared by identity. When a rule fires, each action's
 ``run(ctx)`` resolves its target and calls the matching :class:`ActionContext`
@@ -33,12 +33,14 @@ if TYPE_CHECKING:
 __all__ = [
     "Action",
     "Destroy",
+    "EndAfter",
     "Handler",
     "Play",
     "Spawn",
     "Split",
     "Target",
     "destroy",
+    "end_after",
     "play",
     "spawn",
     "split",
@@ -125,13 +127,24 @@ class Spawn:
         ctx._spawn_action(self)
 
 
-type Action = Play | Destroy | Split | Spawn
+@dataclass(frozen=True, eq=False)
+class EndAfter:
+    """End the video ``seconds`` after the current frame (see :func:`end_after`)."""
+
+    seconds: float
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Queue the new end."""
+        ctx.end_after(self.seconds)
+
+
+type Action = Play | Destroy | Split | Spawn | EndAfter
 """Any built-in action."""
 
 type Handler = Action | Callable[..., object]
 """A rule handler: a built-in action or a Python callable (see ``Scene.on_collision``)."""
 
-ACTION_TYPES: tuple[type, ...] = (Play, Destroy, Split, Spawn)
+ACTION_TYPES: tuple[type, ...] = (Play, Destroy, Split, Spawn, EndAfter)
 
 
 def play(source: Source, *, gain: float = 1.0) -> Play:
@@ -256,3 +269,17 @@ def spawn(
         elasticity=_non_negative_number("elasticity", elasticity),
         max_total=_max_total(max_total),
     )
+
+
+def end_after(seconds: float) -> EndAfter:
+    """Return an action that ends the video ``seconds`` after the current frame (FR-209).
+
+    With ``F`` the number of frames simulated once the current frame completes,
+    ``scene.total_frames`` becomes ``min(total_frames, F + round(seconds * fps))``, so
+    ``frames()``, ``render()``, ``preview()`` and ``audio_buffer()`` stop there.
+    Repeated calls keep the earliest end.
+
+    Raises:
+        ConfigError: if ``seconds`` is not a finite number >= 0.
+    """
+    return EndAfter(seconds=_non_negative_number("seconds", seconds))

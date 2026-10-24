@@ -4,12 +4,12 @@ import random
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
-from bouncekit.actions import Play, Spawn, Split, Target, Value, play, spawn, split
+from bouncekit.actions import Play, Spawn, Split, Target, Value, end_after, play, spawn, split
 from bouncekit.colors import ColorLike, parse_color
 from bouncekit.config import Vec, _vec
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, WorldObject
-from bouncekit.rules.commands import BallSpec, DestroyCmd, SpawnCmd, SplitCmd
+from bouncekit.rules.commands import BallSpec, DestroyCmd, EndCmd, SpawnCmd, SplitCmd
 from bouncekit.sound import Source
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -23,7 +23,7 @@ __all__ = ["ActionContext"]
 class ActionContext:
     """Passed to every handler as ``ctx``; one per (event, rule).
 
-    Methods that change the world (``destroy``, ``split``, ``spawn``) only queue a
+    Methods that change the world (``destroy``, ``split``, ``spawn``, ``end_after``) only queue a
     command: the change is applied after the step's dispatch, never while handlers
     run. ``play`` produces a note trigger immediately (audio only). Bad arguments
     raise ``ConfigError`` at the call.
@@ -32,9 +32,10 @@ class ActionContext:
         scene: the scene being simulated.
         event: the event being dispatched.
         a: the rule's first subject (collision: the object carrying ``tag_a``;
-            destroy: the destroyed object), or ``None``.
-        b: the rule's second subject (collision: the object carrying ``tag_b``), or
-            ``None``.
+            escape: the ball; spawn/destroy: the object), or ``None`` (timer,
+            condition).
+        b: the rule's second subject (collision: the object carrying ``tag_b``;
+            escape: the ring), or ``None``.
         rng: ``scene.rng``; use it for any randomness so renders stay deterministic.
         time: ``event.time`` in seconds.
     """
@@ -165,3 +166,17 @@ class ActionContext:
 
     def _play_action(self, action: Play) -> None:
         self.scene._trigger(action, self.event, self.a)
+
+    def end_after(self, seconds: float) -> None:
+        """Queue ending the video ``seconds`` after the current frame (FR-209).
+
+        ``scene.total_frames`` becomes ``min(total_frames, F + round(seconds * fps))``,
+        where ``F`` is the number of frames simulated once the current frame
+        completes. The earliest end wins.
+
+        Raises:
+            ConfigError: if ``seconds`` is not a finite number >= 0.
+        """
+        action = end_after(seconds)
+        frames = round(action.seconds * self.scene.config.fps)
+        self.scene._queue.append(EndCmd(frames))

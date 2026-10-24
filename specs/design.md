@@ -596,6 +596,15 @@ Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.co
 - Cooldown inheritance copies every `last_pair`/`last_object` entry of the parent's index to the child (`RuleEngine.inherit`) and every `(play, parent)` retrigger timestamp to `(play, child)`; the copy loops are over lookup dicts and do not affect any iteration order.
 - `Scene._tunnels(radius, ring)` is the shared predicate; `_check_tunnelling` raises with it at script time, split/spawn refuse with it at runtime.
 
+### M2.5b Implementation notes (T-203)
+
+- Escape threshold with several escape rules on one ring: the (ring, ball) pair escapes once (FR-208), so a single threshold is needed; it uses the **smallest** `margin` among that ring's escape rules whose tag the ball carries, and the one event dispatches to all of them. With one rule per ring (every example) this is exactly FR-208.
+- Timer events are logged after the step's escape events and run directly on the rule that produced them (`RuleEngine.run`) right after `dispatch` of the cascade/collision/escape events, which keeps FR-203's log order (collisions, escapes, timers) without tagging events with rules.
+- `when` predicates run after `self.frame += 1`, so `scene.frame`/`scene.time` inside a predicate already count the completed frame; the condition event has `frame` = the frame just simulated and `step` = its last step. Commands queued there are applied at once (per rule).
+- `F` of FR-209 is `Scene._frames_done`: `frame + 1` while `step_frame` runs a frame's steps, `frame` afterwards (when rules, or commands applied outside a frame). `EndCmd` stores `round(seconds × fps)` frames, computed when queued.
+- Subject validation error names the rule kind and the registration method, e.g. `... which a timer rule (every) does not have`.
+- `scene.when(predicate)` rejects built-in actions as the predicate as well as non-callables.
+
 ### M2.6 Determinism strategy (NFR-201)
 
 - One ordered pipeline per step (M2.1); all containers iterated are lists in insertion order; dicts/sets keyed by monotonic object indices or rule indices are lookup-only; `id()` never orders anything.

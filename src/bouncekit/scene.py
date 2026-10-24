@@ -21,7 +21,13 @@ from bouncekit.audio.mixer import (
     sample_offset,
 )
 from bouncekit.colors import ColorLike
-from bouncekit.config import AudioConfig, SceneConfig, Vec, _non_negative_number
+from bouncekit.config import (
+    AudioConfig,
+    SceneConfig,
+    Vec,
+    _non_negative_number,
+    _positive_number,
+)
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
 from bouncekit.export.audio import write_wav
@@ -29,7 +35,7 @@ from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.rules.commands import BallSpec, Command, apply
-from bouncekit.rules.engine import METHOD, SUBJECTS, Rule, RuleEngine, RuleKind
+from bouncekit.rules.engine import SUBJECTS, Rule, RuleEngine, RuleKind
 from bouncekit.sound import Scale
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -109,6 +115,7 @@ class Scene:
         self._indices: dict[WorldObject, int] = {}
         self._next_index = 0
         self._step = 0
+        self._in_frame = False  # True while step_frame runs the current frame's steps
         self._events: list[Event] = []
         self._engine = RuleEngine(self)
         self._queue: list[Command] = []  # FIFO, applied after each step's dispatch
@@ -160,7 +167,7 @@ class Scene:
     def _rules(self) -> list[tuple[str, str, tuple[Handler, ...]]]:
         """M1 view of the collision rules as ``(tag_a, tag_b, handlers)`` tuples."""
         return [
-            (r.tag_a, r.tag_b or "", r.handlers)
+            (r.tag_a or "", r.tag_b or "", r.handlers)
             for r in self._engine.rules
             if r.kind == "collision"
         ]
@@ -225,7 +232,52 @@ class Scene:
         def make(items: tuple[Handler, ...]) -> Rule:
             return Rule("collision", items, len(self._engine.rules), tag_a, tag_b, pair, per_object)
 
-        return self._register("collision", handlers, make)
+        return self._register("collision", "on_collision", handlers, make)
+
+    @overload
+    def on_escape(
+        self, ring: CircleBoundary, tag: str, handlers: None = None, *, margin: float = 0.0
+    ) -> Callable[[F], F]: ...
+
+    @overload
+    def on_escape(
+        self,
+        ring: CircleBoundary,
+        tag: str,
+        handlers: Sequence[Handler],
+        *,
+        margin: float = 0.0,
+    ) -> None: ...
+
+    def on_escape(
+        self,
+        ring: CircleBoundary,
+        tag: str,
+        handlers: Sequence[Handler] | None = None,
+        *,
+        margin: float = 0.0,
+    ) -> Callable[[F], F] | None:
+        """When a ball carrying ``tag`` leaves ``ring``, run ``handlers`` (FR-208).
+
+        A ball has escaped once its centre is farther than
+        ``ring.radius + ring.thickness / 2 + ball.radius + margin`` from the ring's
+        centre after a step; each (ring, ball) pair escapes at most once. Callables are
+        called as ``f(ctx, ball, ring, event)``; subject ``a`` is the ball and ``b`` the
+        ring. Without ``handlers``, returns a decorator.
+
+        Raises:
+            ConfigError: if ``ring`` is not a ring handle, for an empty or non-string
+                tag, a negative or non-finite margin, or bad handlers.
+        """
+        if not isinstance(ring, CircleBoundary):
+            raise ConfigError(f"ring must be a ring handle from add_circle; got {ring!r}")
+        _check_tag("tag", tag)
+        extra = _non_negative_number("margin", margin)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("escape", items, len(self._engine.rules), tag, ring=ring, margin=extra)
+
+        return self._register("escape", "on_escape", handlers, make)
 
     @overload
     def on_spawn(self, tag: str, handlers: None = None) -> Callable[[F], F]: ...
@@ -252,7 +304,7 @@ class Scene:
         def make(items: tuple[Handler, ...]) -> Rule:
             return Rule("spawn", items, len(self._engine.rules), tag)
 
-        return self._register("spawn", handlers, make)
+        return self._register("spawn", "on_spawn", handlers, make)
 
     @overload
     def on_destroy(self, tag: str, handlers: None = None) -> Callable[[F], F]: ...
@@ -278,11 +330,104 @@ class Scene:
         def make(items: tuple[Handler, ...]) -> Rule:
             return Rule("destroy", items, len(self._engine.rules), tag)
 
-        return self._register("destroy", handlers, make)
+        return self._register("destroy", "on_destroy", handlers, make)
+
+    @overload
+    def every(self, seconds: float, handlers: None = None) -> Callable[[F], F]: ...
+
+    @overload
+    def every(self, seconds: float, handlers: Sequence[Handler]) -> None: ...
+
+    def every(
+        self, seconds: float, handlers: Sequence[Handler] | None = None
+    ) -> Callable[[F], F] | None:
+        """Run ``handlers`` every ``seconds`` of simulated time (FR-202, FR-209).
+
+        With ``n = round(seconds * fps * substeps)``, the rule fires at steps ``n``,
+        ``2n``, ... Each firing logs a ``"timer"`` event. Callables are called as
+        ``f(ctx, event)``; there are no subjects, so actions must target an object
+        handle. Without ``handlers``, returns a decorator.
+
+        Raises:
+            ConfigError: if ``seconds`` is not a positive finite number or rounds to 0
+                steps, for bad handlers, or an action targeting ``"a"``/``"b"``.
+        """
+        period = self._timer_steps(seconds)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("timer", items, len(self._engine.rules), period=period)
+
+        return self._register("timer", "every", handlers, make)
+
+    @overload
+    def at(self, seconds: float, handlers: None = None) -> Callable[[F], F]: ...
+
+    @overload
+    def at(self, seconds: float, handlers: Sequence[Handler]) -> None: ...
+
+    def at(
+        self, seconds: float, handlers: Sequence[Handler] | None = None
+    ) -> Callable[[F], F] | None:
+        """Run ``handlers`` once, at step ``round(seconds * fps * substeps)``.
+
+        Logs one ``"timer"`` event. Callables are called as ``f(ctx, event)``; there
+        are no subjects. Without ``handlers``, returns a decorator.
+
+        Raises:
+            ConfigError: if ``seconds`` is not a positive finite number or rounds to
+                step 0, for bad handlers, or an action targeting ``"a"``/``"b"``.
+        """
+        at_step = self._timer_steps(seconds)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("timer", items, len(self._engine.rules), at_step=at_step)
+
+        return self._register("timer", "at", handlers, make)
+
+    def _timer_steps(self, seconds: object) -> int:
+        steps = round(_positive_number("seconds", seconds) * self._rate)
+        if steps == 0:
+            raise ConfigError(
+                f"seconds must be at least half a physics step (1/{self._rate} s); got {seconds!r}"
+            )
+        return steps
+
+    @overload
+    def when(
+        self, predicate: Callable[["Scene"], object], handlers: None = None
+    ) -> Callable[[F], F]: ...
+
+    @overload
+    def when(self, predicate: Callable[["Scene"], object], handlers: Sequence[Handler]) -> None: ...
+
+    def when(
+        self, predicate: Callable[["Scene"], object], handlers: Sequence[Handler] | None = None
+    ) -> Callable[[F], F] | None:
+        """Run ``handlers`` once, the first time ``predicate(scene)`` is true.
+
+        The predicate is evaluated after every frame's last step and command
+        application (``scene.frame`` already counts that frame). When it first returns
+        true, one ``"condition"`` event is logged, the handlers run and their commands
+        are applied at once; the rule never fires again. Callables are called as
+        ``f(ctx, event)``; there are no subjects. Without ``handlers``, returns a
+        decorator.
+
+        Raises:
+            ConfigError: if ``predicate`` is not callable, for bad handlers, or an
+                action targeting ``"a"``/``"b"``.
+        """
+        if not callable(predicate) or isinstance(predicate, ACTION_TYPES):
+            raise ConfigError(f"predicate must be a callable f(scene) -> bool; got {predicate!r}")
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("condition", items, len(self._engine.rules), predicate=predicate)
+
+        return self._register("condition", "when", handlers, make)
 
     def _register(
         self,
         kind: RuleKind,
+        method: str,
         handlers: Sequence[Handler] | None,
         make: Callable[[tuple[Handler, ...]], Rule],
     ) -> Callable[[F], F] | None:
@@ -306,7 +451,8 @@ class Scene:
             target = getattr(h, "target", None)
             if isinstance(target, str) and target not in SUBJECTS[kind]:
                 raise ConfigError(
-                    f"{h!r} targets subject {target!r}, which an {METHOD[kind]} rule does not have"
+                    f"{h!r} targets subject {target!r}, which a {kind} rule ({method}) "
+                    f"does not have; target an object handle instead"
                 )
         self._engine.add(make(tuple(handlers)))
         return None
@@ -366,6 +512,11 @@ class Scene:
         )
         self._last_trigger[(play, a)] = ev.step
         self._frame_triggers[ev.frame] = started + 1
+
+    @property
+    def _frames_done(self) -> int:
+        """Frames simulated once the current frame completes (``F`` of FR-209)."""
+        return self.frame + 1 if self._in_frame else self.frame
 
     def _apply_commands(self) -> None:
         """Apply the queued commands in FIFO order and empty the queue."""
@@ -551,30 +702,45 @@ class Scene:
     def step_frame(self) -> None:
         """Advance the simulation by one frame (``substeps`` fixed physics steps).
 
-        After each step: collect its collision events, clamp speeds, dispatch the
-        previous step's spawn/destroy events and then this step's events to the
-        rules, and apply the queued commands (FR-203).
+        After each step: collect its collision events, clamp speeds, detect escapes,
+        emit due timer events, dispatch the previous step's spawn/destroy events and
+        then this step's events to the rules, and apply the queued commands (FR-203).
+        After the frame, ``when`` predicates are checked (FR-209).
         """
         max_speed = self.config.max_speed
         rec = self._recorder
-        rec.frame = self.frame
-        for _ in range(self.config.substeps):
-            self._step += 1
-            rec.step = self._step
-            self.space.step(self._dt)
-            events = rec.flush()
-            self._events.extend(events)
-            # Clamp after the whole step: collision impulses land after velocity
-            # integration, so a clamp inside velocity_func would miss them.
-            for ball in self._balls:
-                ball.clamp_speed(max_speed)
-            pending = self._cascade + events
-            self._cascade = []
-            if self._engine.rules and pending:
-                self._dispatch(pending)
-            if self._queue:
-                self._apply_commands()
+        engine = self._engine
+        frame = self.frame
+        rec.frame = frame
+        self._in_frame = True
+        try:
+            for _ in range(self.config.substeps):
+                self._step += 1
+                step = self._step
+                rec.step = step
+                self.space.step(self._dt)
+                events = rec.flush()
+                self._events.extend(events)
+                # Clamp after the whole step: collision impulses land after velocity
+                # integration, so a clamp inside velocity_func would miss them.
+                for ball in self._balls:
+                    ball.clamp_speed(max_speed)
+                escapes = engine.escapes(step, frame)
+                self._events.extend(escapes)
+                timers = engine.due_timers(step, frame)
+                self._events.extend(ev for _, ev in timers)
+                pending = self._cascade + events + escapes
+                self._cascade = []
+                if engine.rules and pending:
+                    self._dispatch(pending)
+                for rule, ev in timers:
+                    engine.run(rule, ev)
+                if self._queue:
+                    self._apply_commands()
+        finally:
+            self._in_frame = False
         self.frame += 1
+        engine.conditions(self._step, frame)
 
     def draw(self, renderer: Renderer) -> None:
         """Draw the background and every live object, in insertion order.

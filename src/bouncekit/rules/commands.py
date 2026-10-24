@@ -19,7 +19,7 @@ from bouncekit.world.circle import CircleBoundary
 if TYPE_CHECKING:
     from bouncekit.scene import Scene
 
-__all__ = ["BallSpec", "Command", "DestroyCmd", "SpawnCmd", "SplitCmd", "apply"]
+__all__ = ["BallSpec", "Command", "DestroyCmd", "EndCmd", "SpawnCmd", "SplitCmd", "apply"]
 
 
 @dataclass(frozen=True, eq=False)
@@ -60,7 +60,14 @@ class SpawnCmd:
     max_total: int | None
 
 
-type Command = DestroyCmd | SplitCmd | SpawnCmd
+@dataclass(frozen=True, eq=False)
+class EndCmd:
+    """End the video ``frames`` frames after the frames simulated so far (FR-209)."""
+
+    frames: int
+
+
+type Command = DestroyCmd | SplitCmd | SpawnCmd | EndCmd
 
 
 def apply(scene: "Scene", cmd: Command) -> None:
@@ -70,6 +77,8 @@ def apply(scene: "Scene", cmd: Command) -> None:
             scene._remove(cmd.obj)
     elif isinstance(cmd, SplitCmd):
         _split(scene, cmd)
+    elif isinstance(cmd, EndCmd):
+        scene.total_frames = min(scene.total_frames, scene._frames_done + cmd.frames)
     else:
         _spawn(scene, cmd)
 
