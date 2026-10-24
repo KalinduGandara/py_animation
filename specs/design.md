@@ -1082,6 +1082,14 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
   - SDL alpha-blending is deterministic. The exact metric calls are confirmed by introspection in T-404.
 - Preview draws texts the same way, through `Scene.draw`.
 
+### M4.7a Implementation notes (T-401)
+
+- `parse_assignments` (listed under T-402) landed in T-401, since `--set` on `render`/`preview` needs it; T-402 reuses it for `batch`.
+- `run_job(job)` has no `progress` argument yet. T-403 adds it together with `Scene.render(progress=)`, so T-401 builds nothing from that task.
+- `params.check_default(name, default)` holds the default-type check, so `Scene.param` stays short.
+- `bouncekit render` now prints failures as `error: <ExceptionType>: <message>` (the `JobResult.error` text, as the batch `FAILED` lines will). Script exceptions that are not `BouncekitError`s now also exit 2 with that line instead of a traceback (FR-404 isolation applies to `run_job`).
+- `Scene.preview()` restarts reuse the scene's param overrides, like the CLI preview reload.
+
 ### M4.8 Progress (FR-408)
 
 - `Progress.enabled = stream.isatty()` when `enabled` is `None`. The CLI passes `enabled=False` for `--quiet`.

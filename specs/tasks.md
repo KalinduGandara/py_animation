@@ -139,7 +139,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
 
 Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv run ruff check . && uv run mypy`) → tick here → log in `progress.md` → commit `feat(<area>): T-40X <desc> [FR-…]`. Existing M0–M3 tests must pass unmodified (NFR-402).
 
-- [ ] T-401: Vertical slice, params → `--set` → render → metadata JSON.
+- [x] T-401: Vertical slice, params → `--set` → render → metadata JSON.
   - Scope:
     - `params.py`: `check_name`, `parse_value`, `suffix`.
     - `Scene.param` / `Scene.params` and `scene._param_overrides`.

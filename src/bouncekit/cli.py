@@ -3,11 +3,12 @@
 import argparse
 import runpy
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from bouncekit import scene as scene_module
-from bouncekit.errors import BouncekitError, SceneLoadError
+from bouncekit.batch import Job, parse_assignments, run_job
+from bouncekit.errors import BouncekitError, ConfigError, SceneLoadError
 from bouncekit.render.preview import run_preview
 from bouncekit.scene import Scene
 
@@ -15,17 +16,24 @@ DEFAULT_SCALE = 0.45
 ERROR_EXIT = 2
 
 
-def load_scene(path: str | Path, seed: int | None = None, duration: float | None = None) -> Scene:
+def load_scene(
+    path: str | Path,
+    seed: int | None = None,
+    duration: float | None = None,
+    params: Mapping[str, str] | None = None,
+) -> Scene:
     """Execute a scene script and return its single module-level ``Scene``.
 
     ``seed`` and ``duration`` (when not ``None``) override the script's own
-    values; they are active while the script runs, so anything it derives from
-    ``scene.rng`` follows them. The script runs with ``__name__`` set to
+    values, and ``params`` maps param names to override text for
+    ``scene.param``; all are active while the script runs, so anything it derives
+    from them or from ``scene.rng`` follows them. The script runs with ``__name__`` set to
     ``"__bouncekit_scene__"``, so its ``if __name__ == "__main__"`` block is skipped.
 
     Raises:
         SceneLoadError: if the file does not exist or defines zero or several scenes.
-        ConfigError: if the script's scene configuration (or an override) is invalid.
+        ConfigError: if the script's scene configuration (or an override) is invalid,
+            or an override in ``params`` names a param the script never declared.
     """
     file = Path(path)
     if not file.is_file():
@@ -37,10 +45,13 @@ def load_scene(path: str | Path, seed: int | None = None, duration: float | None
         overrides["duration"] = duration
     scene_module._overrides.clear()
     scene_module._overrides.update(overrides)
+    scene_module._param_overrides.clear()
+    scene_module._param_overrides.update(params or {})
     try:
         namespace = runpy.run_path(str(file), run_name="__bouncekit_scene__")
     finally:
         scene_module._overrides.clear()
+        scene_module._param_overrides.clear()
     scenes: list[Scene] = []
     for value in namespace.values():
         if isinstance(value, Scene) and not any(value is s for s in scenes):
@@ -49,7 +60,15 @@ def load_scene(path: str | Path, seed: int | None = None, duration: float | None
         raise SceneLoadError(
             f"{file} must define exactly one module-level Scene; found {len(scenes)}"
         )
-    return scenes[0]
+    scene = scenes[0]
+    declared = scene.params
+    unknown = [name for name in (params or {}) if name not in declared]
+    if unknown:
+        listed = ", ".join(repr(name) for name in unknown)
+        names = ", ".join(declared)
+        known = f"the script declares: {names}" if names else "the script declares no params"
+        raise ConfigError(f"unknown param(s) {listed}; {known}")
+    return scene
 
 
 def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
@@ -66,7 +85,11 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     render.add_argument("scene", **scene_kwargs)  # type: ignore[arg-type]
     render.add_argument("--seed", type=int, help="override the scene's seed")
     render.add_argument("--duration", type=float, help="override the duration in seconds")
-    render.add_argument("--out", type=Path, help="output path (default out/<stem>_seed<N>.mp4)")
+    render.add_argument(
+        "--out", type=Path, help="output path (default out/<stem>_seed<N>[_<name>-<value>...].mp4)"
+    )
+    render.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                        help="override a scene.param (repeatable)")  # fmt: skip
 
     preview = sub.add_parser("preview", help="play the scene in a window")
     preview.add_argument("scene", **scene_kwargs)  # type: ignore[arg-type]
@@ -75,6 +98,8 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     preview.add_argument(
         "--scale", type=float, default=DEFAULT_SCALE, help="window scale (default 0.45)"
     )
+    preview.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                         help="override a scene.param (repeatable)")  # fmt: skip
     return parser
 
 
@@ -92,18 +117,34 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
     script: Path | None = args.scene if args.scene is not None else default_scene
     assert script is not None  # argparse requires it unless default_scene is given
     try:
-        if args.command == "render":
-            scene = load_scene(script, seed=args.seed, duration=args.duration)
-            out = args.out or Path("out") / f"{script.stem}_seed{scene.config.seed}.mp4"
-            written = scene.render(out)
-            print(f"wrote {written} ({scene.frame} frames)")
-        else:
-            load_scene(script, seed=args.seed, duration=args.duration)  # fail fast
+        overrides = parse_assignments(args.set, "--set")
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return ERROR_EXIT
+    if args.command == "render":
+        job = Job(
+            index=1,
+            script=script,
+            seed=args.seed,
+            duration=args.duration,
+            overrides=tuple(overrides),
+            out_dir=Path("out"),
+            out=args.out,
+        )
+        result = run_job(job)
+        if not result.ok:
+            print(f"error: {result.error}", file=sys.stderr)
+            return ERROR_EXIT
+        print(f"wrote {result.out} ({result.frames} frames)")
+        return 0
+    params = dict(overrides)
 
-            def reload() -> Scene:
-                return load_scene(script, seed=args.seed, duration=args.duration)
+    def reload() -> Scene:
+        return load_scene(script, seed=args.seed, duration=args.duration, params=params)
 
-            run_preview(reload, args.scale, watch=script, reload=reload)
+    try:
+        reload()  # fail fast
+        run_preview(reload, args.scale, watch=script, reload=reload)
     except BouncekitError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return ERROR_EXIT

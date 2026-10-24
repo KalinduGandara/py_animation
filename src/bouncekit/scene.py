@@ -44,6 +44,7 @@ from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
 from bouncekit.export.audio import write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
+from bouncekit.params import ParamValue, check_default, check_name, parse_value
 from bouncekit.render.base import GlowArc, GlowDisc, Renderer
 from bouncekit.render.effects import Effects, TrailBall
 from bouncekit.render.pygame_renderer import PygameRenderer
@@ -58,6 +59,9 @@ __all__ = ["Scene", "WorldObject"]
 # Overrides (``seed``, ``duration``) set by the CLI while it executes a scene script.
 # ``Scene.__init__`` applies them before creating ``rng``.
 _overrides: dict[str, object] = {}
+# Param overrides (name -> CLI text) set by the CLI while it executes a scene script;
+# ``Scene.__init__`` copies them and ``Scene.param`` parses them (FR-401, FR-402).
+_param_overrides: dict[str, str] = {}
 
 F = TypeVar("F", bound=Callable[..., object])
 
@@ -157,6 +161,42 @@ class Scene:
         self._hashed = False  # switched to the spatial hash (FR-212)
         self._recorder = EventRecorder(self._rate)
         self._recorder.install(self.space)
+        self._param_src: dict[str, str] = dict(_param_overrides)  # CLI text per name
+        self._params: dict[str, tuple[ParamValue, ParamValue]] = {}  # name -> (default, value)
+
+    def param(self, name: str, default: ParamValue) -> ParamValue:
+        """Declare a param and return its value: the CLI override or ``default``.
+
+        The override text (``--set name=value``) is parsed to the type of
+        ``default``: ``bool`` accepts ``true/false/1/0/yes/no/on/off``, ``int``
+        what ``int()`` accepts, ``float`` finite values, ``str`` any text. Declaring
+        the same name again with an equal default of the same type returns the same
+        value. Never touches ``rng`` or ``fx_rng``.
+
+        Raises:
+            ConfigError: if ``name`` is invalid, ``default`` is not a bool, int,
+                finite float or str, the override cannot be parsed, or the name was
+                declared before with a different default.
+        """
+        check_name(name)
+        check_default(name, default)
+        if name in self._params:
+            old, value = self._params[name]
+            if type(old) is not type(default) or old != default:
+                raise ConfigError(
+                    f"param {name!r} declared again with default {default!r}; "
+                    f"first default was {old!r}"
+                )
+            return value
+        text = self._param_src.get(name)
+        value = default if text is None else parse_value(name, default, text)
+        self._params[name] = (default, value)
+        return value
+
+    @property
+    def params(self) -> dict[str, ParamValue]:
+        """A new dict of every declared param and its value, in declaration order."""
+        return {name: value for name, (_default, value) in self._params.items()}
 
     @property
     def time(self) -> float:
@@ -966,7 +1006,7 @@ class Scene:
         """Play this scene in a live window (Space pause, Right step, R restart, Esc/Q quit).
 
         The first run uses this instance; restarting reloads the running script
-        (``sys.argv[0]``) with this scene's seed and duration, since a scene is
+        (``sys.argv[0]``) with this scene's seed, duration and param overrides, since a scene is
         simulated only once.
 
         Raises:
@@ -981,7 +1021,10 @@ class Scene:
             if first:
                 return first.pop()
             return cli.load_scene(
-                Path(sys.argv[0]), seed=self.config.seed, duration=self.config.duration
+                Path(sys.argv[0]),
+                seed=self.config.seed,
+                duration=self.config.duration,
+                params=self._param_src,
             )
 
         script = Path(sys.argv[0])
