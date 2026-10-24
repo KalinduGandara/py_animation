@@ -154,3 +154,94 @@ def test_bounce_notes_aac_does_not_clip(tmp_path: Path) -> None:
     pcm = np.frombuffer(raw, dtype=np.float32)
     assert len(pcm) > 0
     assert float(np.abs(pcm).max()) < 1.0
+
+
+# --- M2 examples (FR-213, NFR-201, NFR-205) ---
+
+M2 = {
+    n: EXAMPLE.parent / f"{n}.py"
+    for n in ("split_on_wall", "escape_rotating_gap", "destroy_on_contact")
+}
+
+
+def _run(scene: object) -> None:
+    for _ in range(scene.total_frames):  # type: ignore[attr-defined]
+        scene.step_frame()  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize("name", list(M2))
+def test_m2_example_loads_with_rules_and_sound(name: str) -> None:
+    scene = load_scene(M2[name], seed=42)
+    assert scene.has_sound
+    assert len(scene._engine.rules) >= 1
+    kinds = {r.kind for r in scene._engine.rules}
+    expected = {
+        "split_on_wall": {"collision"},
+        "escape_rotating_gap": {"escape"},
+        "destroy_on_contact": {"collision", "timer", "condition"},
+    }[name]
+    assert kinds == expected
+
+
+@pytest.mark.parametrize("name", list(M2))
+def test_m2_example_renders_h264_and_aac(name: str, tmp_path: Path) -> None:
+    out = tmp_path / f"{name}.mp4"
+    assert (
+        main(["render", str(M2[name]), "--seed", "42", "--duration", "2", "--out", str(out)]) == 0
+    )
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,sample_rate,channels",
+         "-of", "json", str(out)],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    streams = {s["codec_name"]: s for s in json.loads(probe.stdout)["streams"]}
+    assert set(streams) == {"h264", "aac"}
+    assert int(streams["aac"]["sample_rate"]) == 48000 and streams["aac"]["channels"] == 2
+
+
+def test_split_example_doubles_then_caps() -> None:
+    scene = load_scene(M2["split_on_wall"], seed=42)
+    counts: list[int] = []
+    for _ in range(scene.total_frames):
+        scene.step_frame()
+        n = scene.count("ball")
+        if not counts or n != counts[-1]:
+            counts.append(n)
+    assert counts[:2] == [1, 2]
+    assert 4 in counts  # the second generation hits the wall and doubles again
+    assert counts == sorted(counts)
+    assert max(counts) <= 256
+    assert max(counts) > 8
+
+
+def test_escape_example_grows_by_one_per_escape_up_to_cap() -> None:
+    scene = load_scene(M2["escape_rotating_gap"], seed=42)
+    _run(scene)
+    escapes = [e for e in scene.events if e.kind == "escape"]
+    assert len(escapes) >= 1
+    assert scene.count("ball") == min(1 + len(escapes), 40)
+
+
+def test_destroy_example_destroys_and_ends_early() -> None:
+    scene = load_scene(M2["destroy_on_contact"], seed=42)
+    full = scene.total_frames
+    _run(scene)
+    assert any(e.kind == "destroy" for e in scene.events)
+    assert scene.total_frames <= full
+
+
+def test_split_example_is_deterministic() -> None:
+    def run(seed: int) -> tuple[bytes, list[tuple[int, str]]]:
+        scene = load_scene(M2["split_on_wall"], seed=seed, duration=4)
+        _run(scene)
+        return scene.audio_buffer().tobytes(), [(e.step, e.kind) for e in scene.events]
+
+    assert run(42) == run(42)
+    assert run(42) != run(43)
+
+
+def test_readme_covers_m2() -> None:
+    text = (EXAMPLE.parent.parent / "README.md").read_text()
+    for word in ("on_collision", "on_escape", "every", "when", "A.split", "A.spawn",
+                 "A.destroy", "end_after", "ctx"):  # fmt: skip
+        assert word in text

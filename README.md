@@ -81,6 +81,66 @@ See `examples/bounce_notes.py` (`uv run bouncekit render examples/bounce_notes.p
 - Louder impacts play louder; the mix is normalised to `peak_dbfs`. Output is
   deterministic for a given seed.
 
+## Rules (M2)
+
+Rules react to events (`Event`: `kind`, `step`, `frame`, `time`, `objects`, `speed`,
+`position`) after each physics step; they never touch the space mid-step, so every
+change is queued and applied right after dispatch. Each `scene.<rule>(..., handlers)`
+takes a list of handlers (built-in actions and/or callables) run in order, or, with the
+handlers omitted, works as a decorator:
+
+```python
+scene.on_collision("ball", "wall", [A.split(max_total=128), A.play(S.scale("C4"))])
+
+@scene.on_collision("ball", "hazard")
+def hit(ctx, a, b, event):      # a carries the first tag, b the second
+    ctx.destroy(a)
+```
+
+Rule kinds and callback signatures:
+
+| Rule | Fires | Callback |
+|---|---|---|
+| `on_collision(tag_a, tag_b, ..., cooldown=, object_cooldown=)` | objects start touching | `f(ctx, a, b, event)` |
+| `on_escape(ring, tag, ..., margin=)` | a tagged ball leaves the ring (once per pair) | `f(ctx, ball, ring, event)` |
+| `on_spawn(tag, ...)` / `on_destroy(tag, ...)` | a tagged object is added / removed | `f(ctx, obj, event)` |
+| `every(seconds, ...)` / `at(seconds, ...)` | periodically / once at a time | `f(ctx, event)` |
+| `when(predicate, ...)` | first frame `predicate(scene)` is true | `f(ctx, event)` |
+
+Built-in actions (`from bouncekit import actions as A`; `target="a"` by default, or
+`"b"`, or a ball/ring handle):
+
+| Action | Effect |
+|---|---|
+| `A.play(source, gain=1.0)` | play a note |
+| `A.destroy(target=)` | remove a ball or ring |
+| `A.split(into=2, spread_degrees=30, radius_scale=1, max_total=None)` | split a ball into several |
+| `A.spawn(pos=, radius=, velocity=, count=1, color=, tags=, constant_speed=, max_total=)` | add balls; `pos`/`velocity`/`color` may be `f(ctx)` |
+| `A.recolor(color)`, `A.resize(...)`, `A.set_velocity(...)`, `A.flash(...)` | change look or motion |
+| `A.end_after(seconds)` | end the video that long after the current frame |
+
+`ctx` (`ActionContext`) has `scene`, `event`, `a`, `b`, `rng` (use it for all randomness),
+`time` and the matching methods: `ctx.destroy(obj)`, `ctx.split(...)`, `ctx.spawn(...)`,
+`ctx.recolor`, `ctx.resize`, `ctx.set_velocity`, `ctx.flash`, `ctx.play(source)`,
+`ctx.end_after(seconds)`. Queued commands on an object that is already gone are skipped.
+
+- **Cooldowns:** a collision rule skips its non-play handlers for a pair that fired
+  less than `cooldown` seconds ago (default `Scene(rule_cooldown=0.05)`); `object_cooldown`
+  does the same per object. `A.play` is governed by the audio trigger policy instead.
+- **Caps and refusal:** `Scene(max_balls=1000)` caps live balls. A split or spawn that would
+  exceed it (or its own `max_total`) or whose ball could tunnel through a ring is
+  refused silently and deterministically; it never raises mid-render.
+- **Constant speed:** `add_ball(..., constant_speed=True)` (also on `A.spawn`) keeps a
+  ball at its initial speed after every step.
+- **Ending early:** `A.end_after(seconds)` / `ctx.end_after(seconds)` shortens the video;
+  `render` and `audio_buffer` stop there.
+- Scenes with 100+ balls switch to pymunk's spatial hash automatically.
+
+Examples (each renders with an AAC track): `examples/split_on_wall.py` (a ball doubles on
+every wall hit up to a cap), `examples/escape_rotating_gap.py` (balls escape a rotating
+gap and are replaced by two), `examples/destroy_on_contact.py` (a hazard destroys balls;
+`every` spawns more; `when` + `end_after` ends the video).
+
 ## CLI
 
 `bouncekit render <scene.py> [--seed N] [--duration S] [--out PATH]` and
