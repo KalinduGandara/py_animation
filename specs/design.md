@@ -395,3 +395,211 @@ AAC encoder delay is recorded by ffmpeg as an edit list in MP4, so players align
 | No sound rules | video-only MP4 (M0 output) | silent AAC track (extra encode, changes M0 output for no benefit) |
 | Limiter | `tanh` + peak normalise | look-ahead compressor (more code; tanh is transparent at normal levels) |
 | WAV format | 32-bit float | 16-bit PCM (quantises the deterministic buffer; AAC re-encodes anyway) |
+
+---
+
+## M2 — Rules engine
+
+### M2.1 Overview
+
+```mermaid
+flowchart TB
+    step[space.step dt] --> rec[EventRecorder.flush<br/>collision events]
+    rec --> clamp[clamp max_speed<br/>constant speed]
+    clamp --> esc[escape check<br/>rings x balls]
+    esc --> tim[due timers]
+    tim --> log[(scene.events)]
+    log --> disp[RuleEngine.dispatch<br/>cascade events of previous step first,<br/>then this step's events]
+    disp -->|built-in actions / callbacks<br/>via ActionContext| queue[(command queue)]
+    disp -->|A.play / ctx.play| trig[(scene.triggers)]
+    queue --> apply[apply commands FIFO<br/>split / spawn / destroy / resize ...]
+    apply -->|spawn / destroy events| cascade[(next step's cascade)]
+    apply --> hash[switch to spatial hash<br/>once at >= 100 balls]
+    frameEnd[end of frame] --> when[when predicates<br/>fire once -> dispatch + apply]
+```
+
+Nothing mutates the space between `space.step` entry and the end of dispatch. Commands run in the window after dispatch and before the next `space.step`, which is equivalent to a pymunk post-step callback but keeps all mutation in one ordered place.
+
+### M2.2 Modules (new/changed)
+
+```
+src/bouncekit/
+  events.py          # Event (CollisionEvent = Event alias), EventKind; EventRecorder
+                     #   unchanged except indices come from the scene counter      FR-201
+  actions.py         # public built-ins: Play (unchanged), Split, Spawn, Destroy,
+                     #   Recolor, Resize, SetVelocity, Flash, EndAfter + factory
+                     #   functions; each has run(ctx) and SUBJECT field `target`   FR-206..FR-210
+  rules/
+    __init__.py      # re-exports ActionContext
+    context.py       # ActionContext (queues commands, ctx.play), Command dataclasses FR-203
+    engine.py        # Rule, RuleEngine: registration, matching, cooldowns,
+                     #   timers, escapes, when, dispatch                             FR-202..FR-204, FR-208, FR-209
+    commands.py      # apply(scene, command): split/spawn/destroy/resize/... with
+                     #   cap + tunnelling refusal                                    FR-205..FR-210
+  world/ball.py      # + generation, alive, constant_speed, target_speed,
+                     #   color setter, set_radius(), draw(renderer, color=None)    FR-206, FR-210, FR-212
+  world/circle.py    # + alive, color setter, draw(renderer, color=None)
+  config.py          # SceneConfig + rule_cooldown, max_balls                      FR-204, FR-205
+  scene.py           # owns RuleEngine; on_* / every / at / when; count();
+                     #   step loop per M2.1; _spawn_ball/_remove internals;
+                     #   flash state; end_after; render audio decision               all
+examples/split_on_wall.py, escape_rotating_gap.py, destroy_on_contact.py           FR-213
+```
+
+`rules/` imports `world/`, `events`, `actions` types only through `TYPE_CHECKING` where needed to avoid cycles; `actions.py` calls `ctx.<method>` so it does not import `rules`.
+
+### M2.3 Public API
+
+```python
+from bouncekit import Scene, actions as A, sound as S
+
+scene = Scene(..., max_balls=1000, rule_cooldown=0.05)
+ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=30,
+                        angular_velocity=45, tags={"wall"})
+scene.add_ball(pos=(540, 700), radius=20, velocity=(300, 0), constant_speed=True, tags={"ball"})
+
+scene.on_collision("ball", "wall", [A.split(into=2, spread_degrees=30, max_total=256),
+                                    A.play(S.scale("C4", voice="pluck")),
+                                    A.flash(ring, seconds=0.08)])
+
+@scene.on_collision("ball", "ball")
+def custom(ctx, a, b, contact):
+    if a.radius > 30:
+        ctx.destroy(a)
+
+scene.on_escape(ring, "ball", [A.destroy(), A.play(S.note("C6"))])
+scene.every(2.0, [A.spawn(pos=(540, 960), radius=15, velocity=lambda ctx: (ctx.rng.uniform(-300, 300), 0))])
+scene.when(lambda w: w.count("ball") >= 500, [A.end_after(seconds=3)])
+```
+
+```python
+# events.py
+EventKind = Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
+@dataclass(frozen=True)
+class Event:
+    kind: EventKind; step: int; frame: int; time: float
+    objects: tuple[WorldObject, ...]      # see FR-201
+    speed: float | None                   # None for timer/condition
+    position: Vec | None
+CollisionEvent = Event                    # M1 name kept
+
+# actions.py  (all frozen dataclasses, eq=False -> identity; validated in factories)
+Target = Literal["a", "b"] | WorldObject
+Handler = Action | Callable[..., object]
+def split(*, into=2, spread_degrees=30.0, radius_scale=1.0, max_total=None, target="a") -> Split
+def spawn(*, pos, radius, velocity=(0.0, 0.0), count=1, color="#ffffff", tags=("ball",),
+          elasticity=1.0, constant_speed=False, max_total=None) -> Spawn
+          # pos / velocity / color: value or Callable[[ActionContext], value]
+def destroy(*, target="a") -> Destroy
+def recolor(color, *, target="a") -> Recolor
+def resize(*, radius=None, scale=None, target="a") -> Resize
+def set_velocity(*, velocity=None, speed=None, target="a") -> SetVelocity
+def flash(target="a", *, seconds=0.08, color="#ffffff") -> Flash
+def play(source, *, gain=1.0) -> Play                       # unchanged
+def end_after(seconds) -> EndAfter
+Action = Play | Split | Spawn | Destroy | Recolor | Resize | SetVelocity | Flash | EndAfter
+# each: def run(self, ctx: ActionContext) -> None  (resolves target, calls ctx.<method>)
+
+# rules/context.py
+class ActionContext:
+    scene: Scene; event: Event; a: WorldObject | None; b: WorldObject | None
+    rng: random.Random            # scene.rng
+    time: float                   # event.time
+    def destroy(self, obj: WorldObject) -> None
+    def split(self, ball: Ball, *, into=2, spread_degrees=30.0, radius_scale=1.0, max_total=None) -> None
+    def spawn(self, *, pos, radius, velocity=(0.0, 0.0), count=1, color="#ffffff",
+              tags=("ball",), elasticity=1.0, constant_speed=False, max_total=None) -> None
+    def recolor(self, obj: WorldObject, color: ColorLike) -> None
+    def resize(self, ball: Ball, radius: float) -> None
+    def set_velocity(self, ball: Ball, velocity: Vec) -> None
+    def flash(self, obj: WorldObject, *, seconds=0.08, color="#ffffff") -> None
+    def play(self, source: Source, *, gain=1.0) -> None     # immediate trigger (policy applies)
+    def end_after(self, seconds: float) -> None
+# All but play append a Command (frozen dataclass: DestroyCmd, SplitCmd, SpawnCmd, RecolorCmd,
+# ResizeCmd, VelocityCmd, FlashCmd, EndCmd) to scene's queue. Values are validated here
+# (ConfigError) so a bad call in a callback fails at its source.
+
+# Scene additions
+Scene(..., max_balls: int = 1000, rule_cooldown: float = 0.05)
+def on_collision(self, tag_a, tag_b, handlers=None, *, cooldown=None, object_cooldown=0.0)
+def on_escape(self, ring: CircleBoundary, tag: str, handlers=None, *, margin=0.0)
+def on_spawn(self, tag: str, handlers=None)
+def on_destroy(self, tag: str, handlers=None)
+def every(self, seconds: float, handlers=None)
+def at(self, seconds: float, handlers=None)
+def when(self, predicate: Callable[[Scene], bool], handlers=None)
+    # each: handlers given -> None; omitted -> decorator returning the function
+def count(self, tag: str | None = None) -> int
+def add_ball(self, *, ..., constant_speed: bool = False) -> Ball
+objects: tuple[WorldObject, ...]   # live only
+total_frames: int                  # may shrink via end_after
+
+# Ball additions
+generation: int; alive: bool; constant_speed: bool; target_speed: float
+color: Color (settable)            # CircleBoundary: alive, color settable too
+```
+
+### M2.4 Rule engine (FR-202..FR-204, FR-208, FR-209)
+
+```python
+@dataclass(eq=False)
+class Rule:
+    kind: Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
+    handlers: tuple[Handler, ...]
+    tag_a: str | None = None; tag_b: str | None = None     # collision; tag_a for escape/spawn/destroy
+    ring: CircleBoundary | None = None; margin: float = 0.0
+    cooldown: float = 0.0; object_cooldown: float = 0.0          # seconds
+    period: int = 0; at_step: int = 0                         # timers, in steps
+    predicate: Callable | None = None; fired: bool = False    # when
+    index: int                                                # registration order
+```
+
+- Matching per event kind: collision as M1 (`a` carries `tag_a`); escape: `rule.ring is ring and tag in ball.tags`; spawn/destroy: `tag in obj.tags`; timer: only the rule that produced the event (`TimerEvent` carries no rule, so the engine dispatches timer events directly to their rule rather than matching); condition: same.
+- Cooldown state: `last_pair: dict[(rule.index, i, j), step]`, `last_object: dict[(rule.index, i), step]` keyed by object indices (lookup only). Check = exact step gap, as M1 (`(step − last) / rate < cooldown`). Only non-play handlers are gated; when gated handlers run, the timestamps update. Play handlers go straight to the M1 policy function.
+- The M1 policy body of `Scene._dispatch` is factored into `_trigger(play, event, a)`; `Scene._dispatch(events)` remains as the entry point (M1 tests call it directly) and delegates to `RuleEngine.dispatch`. The per-frame cap counts `dict[frame, int]`, keyed by `event.frame` (entries for older frames are deleted when a newer frame appears).
+- Object indices: `Scene._next_index` (monotonic, never reused) replaces `len(self._objects)` when registering with the recorder, so removal never aliases keys.
+- Escape state: `escaped: set[(ring_idx, ball_idx)]` is lookup-only; iteration is over `scene._rings`/`scene._balls` lists in insertion order, restricted to rings that have escape rules and balls matching any of that ring's tags. Distance check uses `math.hypot` on positions after the step.
+- Timers: computed at registration in steps; at each step the engine checks `step % period == 0` / `step == at_step` over timer rules in registration order and emits `Event(kind="timer", objects=(), speed=None, position=None)`.
+- `when`: after the frame, for rules with `fired == False` in registration order: if `predicate(scene)`: set fired, log `Event("condition", step=last step of the frame, ...)`, dispatch that rule only, apply commands.
+- Handler call: for an `Action`, `handler.run(ctx)`; for a callable, the per-kind signature (FR-202). A fresh `ActionContext` per (event, rule).
+
+### M2.5 Commands (FR-205..FR-210)
+
+`apply(scene, cmd)` in `rules/commands.py`; every function first checks `target.alive` and the target type (no-op otherwise).
+
+- **Split**: `r' = r · radius_scale`; refuse if `scene.count_balls − 1 + into > min(max_balls, max_total or ∞)` or `_tunnels(r')` against any live ring (same formula as `Scene._check_tunnelling`, but returning bool). Otherwise compute `θ`, `s`, offsets per FR-206; parent: `set_radius(r')`, position/velocity of child 0, `generation += 1`; children 1..into−1 via `scene._spawn_ball(...)` (registers with recorder, objects list after the parent's current last object, i.e. appended) inheriting fields; copy the parent's `last_pair`/`last_object`/M1 `_last_trigger` entries to each child index. Emit spawn events in child order.
+- **Spawn**: values were resolved when the handler ran (callables evaluated during dispatch, in ball order — deterministic rng consumption); refuse whole command on cap/tunnelling; else `_spawn_ball` per ball; spawn events.
+- **Destroy**: `space.remove(body, *shapes)` (fires `separate` outside the step → recorder counts drop), remove from `_objects`/`_balls`/`_rings` (list remove, O(n), fine at ≤ 1000), `alive = False`, destroy event.
+- **Resize**: `shape.unsafe_set_radius(r)`, `body.mass = π r²`, `body.moment = moment_for_circle(...)`; refuse on tunnelling.
+- **SetVelocity**: set, then clamp to `max_speed`; constant-speed balls update `target_speed`.
+- **Recolor**: set base colour. **Flash**: `scene._flash[obj_index] = (color, start_frame, n_frames)`; `Scene.draw` passes `color = lerp(flash, base, (frame − start) / n)` while `0 ≤ frame − start < n`, where `start` = the frame count after the current frame completes (the next drawn frame). **End**: `total_frames = min(total_frames, frames_after_current + round(seconds·fps))`.
+- After applying the queue: if not yet hashed and live balls ≥ 100: `space.use_spatial_hash(2 × max radius, 10_000)` (verified signature in pymunk 7.3.1: `use_spatial_hash(dim: float, count: int)`).
+
+Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.constant_speed: ball.renormalize()` (scale to `target_speed` when speed > 0). `target_speed ≤ max_speed` is validated at creation, so the clamp and the renormalisation never fight.
+
+### M2.6 Determinism strategy (NFR-201)
+
+- One ordered pipeline per step (M2.1); all containers iterated are lists in insertion order; dicts/sets keyed by monotonic object indices or rule indices are lookup-only; `id()` never orders anything.
+- All randomness in actions comes from `ctx.rng` (= `scene.rng`), consumed in dispatch order; spawn callables run during dispatch, not at apply time, so the order is fixed by (event, rule, handler, ball index).
+- Spatial-hash switch happens at a deterministic step with deterministic parameters; Chipmunk's results with the hash are deterministic for a fixed build.
+- Cascades are bounded to one level per step, so an on_spawn → spawn chain cannot loop inside one step.
+- Tests: two builds of a split scene → equal frame hashes, `audio_buffer().tobytes()`, and event keys `(kind, step, object indices, speed, position)`; seed change differs.
+
+### M2.7 Rendering and audio impact
+
+- `Ball.draw(renderer, color=None)` / `CircleBoundary.draw(renderer, color=None)`: `None` → base colour. Only `Scene.draw` passes flash colours; renderer protocol unchanged.
+- `has_sound` = any rule has a `Play` handler. `render`: a scene with no rules encodes straight to `out` as in M0. Otherwise it encodes the video into the temp dir, then muxes WAV + video into `out` iff `has_sound or self.triggers` (FR-211), else moves the video-only file to `out`.
+
+### M2.8 Key decisions and alternatives
+
+| Decision | Chosen | Alternatives (rejected because) |
+|---|---|---|
+| Where mutation happens | one FIFO command queue applied after each step's dispatch | pymunk `add_post_step_callback` per command (keyed by object, one callback per key — loses ordering between commands on the same object; harder to test); applying at frame end (actions lag up to 7 steps; split children would start from stale positions) |
+| Dispatch granularity | per step (exact event time; children start from the post-bounce state) | per frame as in M1 (kept equivalent for audio via `event.frame` cap) |
+| Split keeps the parent | parent = child 0, `into − 1` new balls | destroy parent + spawn `into` (fires destroy rules on every split, churns handles) |
+| Cap / tunnelling at runtime | refuse the whole command silently | partial split (non-obvious counts); clamp radius (changes the look silently); raise (crashes a long render) |
+| Cooldowns vs play | play exempt; uses M1 retrigger policy | gate play too (breaks M1 policy tests and double-limits audio) |
+| Cascades | spawn/destroy events dispatched next step | same-step fixpoint loop (needs an iteration limit; can loop forever via spawn↔destroy) |
+| `when` | fires once | edge-triggered repeat (not needed by any example; one flag later if wanted) |
+| Event type | one `Event` dataclass with `kind` (`CollisionEvent` alias) | one class per kind (more types for the same fields; `play` reads speed/step uniformly) |
+| Spatial hash | automatic at 100 balls, fixed dim/count | user option (no example needs tuning; constant is documented) |

@@ -29,6 +29,7 @@
 - 2026-10-24: T-103 done: sound.py `Scale`/`scale` (5 modes, octaves 1..8, top root, identity-hashed; top note > 20 kHz is a ConfigError), `Play` accepts `Scale`; `AudioConfig` validates every field; `Scene._dispatch` applies min impact speed, retrigger interval per (play, object a) on exact step gaps, per-frame cap, gain curve, per-scene scale cursor advanced only by played notes; mixer steals the oldest note with a linear 5 ms fade when `max_polyphony` notes sound (triggers mixed in offset order). Tests: test_scale.py, test_policy.py (incl. AudioConfig cases); test_events gain assertion updated to the FR-106 curve (was the documented T-101 staging value). Gate passes.
 - 2026-10-24: T-104 done: examples/bounce_notes.py (ring tagged wall, ball tagged ball, scale-pluck rule), README Sound (M1) section, new tests in test_example.py (layout, aac 48 kHz stereo stream, WAV onset at trigger offset, README keywords); example rendered and ffprobe-verified (h264 + aac 48000 Hz stereo). Gate passes.
 - 2026-10-24: M1 review fixes (regression tests first) [FR-105, FR-107, FR-109, NFR-103]: (1) AAC overshoot: root cause was `Pluck`'s full-band noise excitation (true peak 1.43x sample peak) plus tanh-saturated dense mixes (true peak +1.3 dB); excitation now smoothed by one [1,2,1]/4 pass, and `Scene.render` applies new `mixer.limit_true_peak` (8x FFT true peak, -1 dBTP) before the WAV; bounce_notes seed 42 / 8 s decodes to 0.878 (was 1.029), 200-trigger mix to 0.939 (was 1.339); `mix()` and `audio_buffer()` unchanged. (2) Pluck tuning: delay-line output resampled by `(N + 0.5) * hz / 48000` -> within 0.5 cents C4..E7 (was +33 cents at C7). (3) Clicks: `Pluck`/`Marimba` fade linearly to 0 over their last 50 ms. Tests: test_voices.py (tuning, release, true peak), test_mixer.py (true_peak, limit_true_peak), test_example.py::test_bounce_notes_aac_does_not_clip; gate passes (411 tests, ~22 s; ruff + mypy clean).
+- 2026-10-24: M2 planned: requirements FR-201..FR-213 / NFR-201..NFR-205, design §M2, tasks T-201..T-205, assumptions C1..C24. Probes (pymunk 7.3.1): `Space.use_spatial_hash(dim, count)`, `Circle.unsafe_set_radius(r)`; `space.remove` outside a step fires `separate` for touching pairs (recorder counts stay correct after destroy).
 
 ## Traceability (requirement -> tests)
 
@@ -70,4 +71,4 @@
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done.
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) specified: T-201..T-205 pending.

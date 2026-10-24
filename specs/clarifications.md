@@ -78,3 +78,32 @@ Made by the spec author with the recommended default (user delegated: "handle ap
 - B13. **Stereo, centred in M1**, 48 kHz fixed (not configurable); WAV written as 32-bit float to a temp dir and deleted after muxing. Reason: SRS fixes 48 kHz; pan is M3; float avoids quantising the deterministic buffer.
 - B14. **Master bus = `tanh` then peak-normalise to -1 dBFS, then a 5 ms fade-out at the end.** Quiet scenes are therefore raised to -1 dBFS too. Reason: simplest limiter that guarantees ≤ 1.0; consistent loudness across videos. M1 review addendum (2026-10-24): the guarantee held only for the WAV samples; before AAC encoding the delivered mix is additionally limited to a −1 dBTP true peak (FR-109), the usual headroom for lossy delivery.
 - B15. **Default voice is `"sine"`.** Reason: neutral, predictable; the example uses `"pluck"`.
+
+## M2 assumptions
+
+Made by the spec author with the recommended default (user delegated, Round 2); reported to the user at the end.
+
+- C1. **Dispatch runs after every physics step** (not once per frame as in M1). Reason: actions such as split must start from the post-bounce state; per-step dispatch keeps M1 audio identical because the per-frame cap is keyed on `event.frame`.
+- C2. **One FIFO command queue** applied after dispatch replaces pymunk post-step callbacks. Reason: same safety (nothing mutates inside `space.step`), preserves ordering between commands, easy to test.
+- C3. **Commands targeting a dead object are skipped silently.** Reason: two rules may legitimately act on the same ball in one step (e.g. destroy and split); first wins deterministically.
+- C4. **Rule cooldowns gate only non-play handlers; `A.play` keeps the M1 retrigger policy.** Reason: gating play too would change M1 behaviour (M1 policy tests) and double-limit audio.
+- C5. **Default pair cooldown 0.05 s (`Scene(rule_cooldown=0.05)`), object cooldown 0 (off).** Reason: the M1 recorder already suppresses resting contact; the cooldown only absorbs micro-bounce re-contacts.
+- C6. **Spawn/destroy events from commands are dispatched at the next step** (one cascade level per step). Reason: avoids unbounded same-step loops (spawn ↔ destroy) without an arbitrary iteration limit.
+- C7. **Split keeps the parent as child 0** and new children inherit the parent's cooldown and retrigger timestamps. Reason: stable handles, no destroy events per split, and children touching the same wall do not instantly re-split or re-play.
+- C8. **Caps and tunnelling at runtime refuse the whole command** (no partial split, no radius clamp, no exception). Reason: deterministic, never crashes a long render, and the shrinking-split visual simply stops at the limit.
+- C9. **`when` fires once**, the first frame its predicate is true, evaluated after the frame. Reason: matches the SRS `end_after` use; predicates may be costly (counting), so per frame not per step.
+- C10. **Timer times are rounded to whole steps**; `every` starts at `t = seconds`, not 0; zero-step timers are errors. Reason: integer step math like M1 sample offsets; an event at t = 0 would precede any physics.
+- C11. **Escape threshold**: centre beyond `radius + thickness/2 + ball radius + margin` (ball fully outside the ring band), `margin=0` default, once per (ring, ball). Reason: the ball visibly leaves before the event; never fires for a ball bouncing on the wall.
+- C12. **Default ball cap `max_balls=1000`**; `add_ball` beyond it is a `ConfigError` (script time), runtime spawns are refused. Reason: keeps renders tractable; script-time errors are cheap to fix.
+- C13. **`max_total` counts all live balls in the scene** after the action, not only balls produced by that action. Reason: matches "ball doubles each wall hit, capped" in the SRS example.
+- C14. **Spatial hash switches automatically once at 100 live balls**, `dim = 2 × largest radius`, `count = 10 000`, never back. Reason: SRS asks for it "when ball count is large"; no example needs tuning, so no public option.
+- C15. **Constant speed target = initial |velocity|**, updated by `set_velocity`; split children inherit it; must be > 0 and ≤ `max_speed`. Reason: simplest rule that counters energy drift without fighting the clamp.
+- C16. **Split geometry**: directions spread evenly over `spread_degrees` centred on the parent's direction; children placed side by side perpendicular to it, `2r' + 1` px apart. Reason: children diverge immediately and do not overlap each other; overlap with walls is resolved by the solver.
+- C17. **Spawn values may be callables `f(ctx)`** evaluated during dispatch, per ball. Reason: escape example needs random velocities from `scene.rng` without a mini-language; dispatch-time evaluation fixes rng order.
+- C18. **Subjects**: collision `a` = object with `tag_a`; escape `a` = ball, `b` = ring; spawn/destroy `a` = object; timers/conditions none. Targeting a missing subject is a registration-time `ConfigError`. Reason: catches mistakes before rendering.
+- C19. **Callback signatures**: collision `(ctx, a, b, event)`, escape `(ctx, ball, ring, event)`, spawn/destroy `(ctx, obj, event)`, timer/condition `(ctx, event)`. Reason: follows the SRS `custom(ctx, a, b, contact)` shape; the event is always last.
+- C20. **Event model**: one `Event` dataclass with `kind`; `CollisionEvent` is an alias; timer/condition events have `speed=None`, `position=None`. Play on such events uses `play.gain` and skips `min_impact_speed`. Reason: uniform log for audio and M4 metadata; M1 code keeps working.
+- C21. **`end_after` only shortens the video**, earliest end wins, counted from the end of the current frame. Reason: predictable; duration remains the upper bound.
+- C22. **Flash = colour blend from flash colour back to base over `round(seconds·fps)` frames** (min 1), drawn by the scene, not stored in physics. Reason: visual-only per SRS P3; glow/particles are M3.
+- C23. **`destroy` works on rings too; `split`/`resize`/`set_velocity` on a ring are no-ops.** Reason: breaking a ring is a natural effect; ring geometry changes are M5 territory.
+- C24. **`render` muxes audio when any rule has `A.play` or any trigger was produced** (e.g. `ctx.play` in a callback). Reason: callback-only sound must not be lost; rule-less scenes stay video-only (B11).

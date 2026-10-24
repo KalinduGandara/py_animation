@@ -13,10 +13,12 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), ffmpeg (s
 - Render: `uv run bouncekit render examples/single_ball.py [--seed N] [--duration S] [--out PATH]`
 - Preview: `uv run bouncekit preview examples/single_ball.py` (silent; audio is offline only)
 - Render with sound (M1): `uv run bouncekit render examples/bounce_notes.py`
+- Rules examples (M2): `uv run bouncekit render examples/split_on_wall.py` (also `escape_rotating_gap.py`, `destroy_on_contact.py`)
 
 ## Conventions
 - Determinism is non-negotiable: fixed timestep, `scene.rng` only, no wall-clock in simulation, insertion-ordered containers.
-- Never mutate the pymunk space inside a collision callback; queue changes.
+- Never mutate the pymunk space inside a collision callback; queue changes. Rules (M2) dispatch after every `space.step`; actions and `ActionContext` methods only append commands, which are applied FIFO after dispatch (`rules/`). Use `ctx.rng`/`scene.rng` for randomness in actions and callbacks.
+- Runtime cap/tunnelling violations (split, spawn, resize) are refused silently and deterministically, never raised mid-render.
 - Public API: screen pixels, origin top-left, +y down; keyword-only options; dataclasses for config; raise `ConfigError` with field + value for bad config.
 - Audio: collision callbacks only record events; rules turn them into note triggers after each frame; the mixer runs once after simulation. Sample offsets use integer math on the physics step count (never `time * 48000`). 48 kHz stereo float.
 - Renderer only reads world state. Drawing goes through the `Renderer` protocol.
