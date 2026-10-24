@@ -214,7 +214,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - A scene with vs without text has identical ball states, events and rng state per frame.
     - A spy renderer shows no `text` calls for text-free scenes.
 
-- [ ] T-405: Example, README, docs.
+- [x] T-405: Example, README, docs.
   - Scope:
     - `examples/param_sweep.py`: params `gap` (float, ring gap degrees) and `speed`/`hue_step`, title text with `end`, callable ball counter, sound, escape + spawn rules.
     - README quickstart and M4 API overview: `scene.param`, `--set`, `batch` with `--seeds/--grid/--jobs/--out-dir/--quiet`, naming, metadata JSON fields, `add_text`, progress bar.

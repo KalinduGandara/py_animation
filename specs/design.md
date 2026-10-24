@@ -454,21 +454,32 @@ examples/split_on_wall.py, escape_rotating_gap.py, destroy_on_contact.py        
 from bouncekit import Scene, actions as A, sound as S
 
 scene = Scene(..., max_balls=1000, rule_cooldown=0.05)
-ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=30,
-                        angular_velocity=45, tags={"wall"})
+ring = scene.add_circle(
+    center=(540, 960), radius=450, gap_degrees=30, angular_velocity=45, tags={"wall"}
+)
 scene.add_ball(pos=(540, 700), radius=20, velocity=(300, 0), constant_speed=True, tags={"ball"})
 
-scene.on_collision("ball", "wall", [A.split(into=2, spread_degrees=30, max_total=256),
-                                    A.play(S.scale("C4", voice="pluck")),
-                                    A.flash(ring, seconds=0.08)])
+scene.on_collision(
+    "ball",
+    "wall",
+    [
+        A.split(into=2, spread_degrees=30, max_total=256),
+        A.play(S.scale("C4", voice="pluck")),
+        A.flash(ring, seconds=0.08),
+    ],
+)
+
 
 @scene.on_collision("ball", "ball")
 def custom(ctx, a, b, contact):
     if a.radius > 30:
         ctx.destroy(a)
 
+
 scene.on_escape(ring, "ball", [A.destroy(), A.play(S.note("C6"))])
-scene.every(2.0, [A.spawn(pos=(540, 960), radius=15, velocity=lambda ctx: (ctx.rng.uniform(-300, 300), 0))])
+scene.every(
+    2.0, [A.spawn(pos=(540, 960), radius=15, velocity=lambda ctx: (ctx.rng.uniform(-300, 300), 0))]
+)
 scene.when(lambda w: w.count("ball") >= 500, [A.end_after(seconds=3)])
 ```
 
@@ -546,12 +557,17 @@ color: Color (settable)            # CircleBoundary: alive, color settable too
 class Rule:
     kind: Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
     handlers: tuple[Handler, ...]
-    tag_a: str | None = None; tag_b: str | None = None     # collision; tag_a for escape/spawn/destroy
-    ring: CircleBoundary | None = None; margin: float = 0.0
-    cooldown: float = 0.0; object_cooldown: float = 0.0          # seconds
-    period: int = 0; at_step: int = 0                         # timers, in steps
-    predicate: Callable | None = None; fired: bool = False    # when
-    index: int                                                # registration order
+    tag_a: str | None = None
+    tag_b: str | None = None  # collision; tag_a for escape/spawn/destroy
+    ring: CircleBoundary | None = None
+    margin: float = 0.0
+    cooldown: float = 0.0
+    object_cooldown: float = 0.0  # seconds
+    period: int = 0
+    at_step: int = 0  # timers, in steps
+    predicate: Callable | None = None
+    fired: bool = False  # when
+    index: int  # registration order
 ```
 
 - Matching per event kind: collision as M1 (`a` carries `tag_a`); escape: `rule.ring is ring and tag in ball.tags`; spawn/destroy: `tag in obj.tags`; timer: only the rule that produced the event (`TimerEvent` carries no rule, so the engine dispatches timer events directly to their rule rather than matching); condition: same.
@@ -710,12 +726,25 @@ from pathlib import Path
 from bouncekit import Scene, EffectsConfig, actions as A, sound as S, colors as C
 
 ASSETS = Path(__file__).parent.parent / "assets"
-scene = Scene(duration=40, seed=3, background="#07070d",
-              effects=EffectsConfig(trail_seconds=0.35, glow_blur=18, max_particles=2000))
+scene = Scene(
+    duration=40,
+    seed=3,
+    background="#07070d",
+    effects=EffectsConfig(trail_seconds=0.35, glow_blur=18, max_particles=2000),
+)
 ring = scene.add_circle(center=(540, 960), radius=460, color="#e8e8ff", glow=0.6, tags={"wall"})
-scene.add_ball(pos=(540, 700), radius=22, velocity=(320, 0), color=C.hue_cycle(),
-               trail=True, glow=1.0, tags={"ball"})
-tune = S.melody(ASSETS / "midi/ode_to_joy.mid", voice=S.sample(ASSETS / "samples/kalimba.wav", root="A4"))
+scene.add_ball(
+    pos=(540, 700),
+    radius=22,
+    velocity=(320, 0),
+    color=C.hue_cycle(),
+    trail=True,
+    glow=1.0,
+    tags={"ball"},
+)
+tune = S.melody(
+    ASSETS / "midi/ode_to_joy.mid", voice=S.sample(ASSETS / "samples/kalimba.wav", root="A4")
+)
 scene.on_collision("ball", "wall", [A.play(tune, pan=0.7), A.particles(count=16), A.flash(ring)])
 ```
 
@@ -949,10 +978,12 @@ examples/param_sweep.py (new)                                                   
 from bouncekit import Scene, actions as A, sound as S, colors as C
 
 scene = Scene(duration=30, seed=1, background="#08080f")
-gap = scene.param("gap", 40.0)            # degrees; `--set gap=60` -> 60.0
-speed = scene.param("speed", 350)         # int
-theme = scene.param("theme", "neon")      # str
-ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=gap, angular_velocity=40, tags={"wall"})
+gap = scene.param("gap", 40.0)  # degrees; `--set gap=60` -> 60.0
+speed = scene.param("speed", 350)  # int
+theme = scene.param("theme", "neon")  # str
+ring = scene.add_circle(
+    center=(540, 960), radius=450, gap_degrees=gap, angular_velocity=40, tags={"wall"}
+)
 scene.add_text("Can it escape?", pos=(540, 260), size=72, end=3.0)
 scene.add_text(lambda s: f"balls: {s.count('ball')}", pos=(540, 1700), size=48, color="#9fa8ff")
 ```

@@ -332,3 +332,38 @@ def test_readme_covers_m3() -> None:
     for word in ("trail", "glow", "A.particles", "C.hue_cycle", "S.melody", "S.sample",
                  "pan", "EffectsConfig", "hot-reload"):  # fmt: skip
         assert word in text
+
+
+PARAM_SWEEP = EXAMPLE.parent / "param_sweep.py"
+
+
+def test_param_sweep_declares_params_and_overlays() -> None:
+    scene = load_scene(PARAM_SWEEP)
+    assert len(scene.params) >= 2 and "gap" in scene.params
+    ring_default = next(o for o in scene.objects if isinstance(o, CircleBoundary))
+    changed = load_scene(PARAM_SWEEP, params={"gap": "77"})
+    ring = next(o for o in changed.objects if isinstance(o, CircleBoundary))
+    assert ring.gap_degrees == 77.0 and ring_default.gap_degrees != 77.0
+    assert any(t.end_frame is not None for t in scene.texts)
+    assert any(callable(t.text) for t in scene.texts)
+    assert any(r.kind == "escape" for r in scene._engine.rules)
+    assert scene.has_sound
+
+
+def test_param_sweep_batch_writes_named_outputs(tmp_path: Path) -> None:
+    code = main(["batch", str(PARAM_SWEEP), "--seeds", "1-2", "--grid", "gap=30,60",
+                 "--duration", "0.5", "--out-dir", str(tmp_path), "--quiet"])  # fmt: skip
+    assert code == 0
+    assert len(list(tmp_path.glob("*.mp4"))) == 4
+    jsons = sorted(tmp_path.glob("*.json"))
+    assert len(jsons) == 4
+    for js in jsons:
+        meta = json.loads(js.read_text())
+        assert f"gap-{meta['params']['gap']:g}" in js.name
+
+
+def test_readme_covers_m4() -> None:
+    text = (EXAMPLE.parent.parent / "README.md").read_text()
+    for word in ("scene.param", "--set", "bouncekit batch", "--seeds", "--grid", "--jobs",
+                 "metadata", ".json", "add_text", "--quiet"):  # fmt: skip
+        assert word in text

@@ -92,8 +92,9 @@ handlers omitted, works as a decorator:
 ```python
 scene.on_collision("ball", "wall", [A.split(max_total=128), A.play(S.scale("C4"))])
 
+
 @scene.on_collision("ball", "hazard")
-def hit(ctx, a, b, event):      # a carries the first tag, b the second
+def hit(ctx, a, b, event):  # a carries the first tag, b the second
     ctx.destroy(a)
 ```
 
@@ -150,9 +151,10 @@ same seed still gives identical frames. Audio gets MIDI melodies, sample voices 
 from bouncekit import colors as C
 
 scene.add_circle(center=(540, 960), radius=450, glow=1.0, tags={"wall"})
-scene.add_ball(pos=(540, 800), radius=22, color=C.hue_cycle(), trail=True, glow=1.0,
-               tags={"ball"})
-tune = S.melody("assets/midi/ode_to_joy.mid", voice=S.sample("assets/samples/kalimba.wav", root="A4"))
+scene.add_ball(pos=(540, 800), radius=22, color=C.hue_cycle(), trail=True, glow=1.0, tags={"ball"})
+tune = S.melody(
+    "assets/midi/ode_to_joy.mid", voice=S.sample("assets/samples/kalimba.wav", root="A4")
+)
 scene.on_collision("ball", "wall", [A.play(tune, pan=0.8), A.particles(count=14)])
 ```
 
@@ -175,6 +177,37 @@ scene.on_collision("ball", "wall", [A.play(tune, pan=0.8), A.particles(count=14)
   `assets/samples/kalimba.wav` deterministically.
 
 See `examples/midi_melody.py` (`uv run bouncekit render examples/midi_melody.py`).
+
+## Parameters, batches and text (M4)
+
+```python
+gap = scene.param("gap", 40.0)      # `--set gap=60` -> 60.0 (typed like the default)
+ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=gap, tags={"wall"})
+scene.add_text("Can it escape?", pos=(540, 260), size=72, end=3.0)
+scene.add_text(lambda s: f"balls: {s.count('ball')}", pos=(540, 1700), size=48)
+```
+
+```bash
+uv run bouncekit render examples/param_sweep.py --set gap=60 --set speed=450
+uv run bouncekit batch examples/param_sweep.py --seeds 1-3 --grid gap=30,60 --jobs 2 --out-dir out/sweep
+```
+
+- `scene.param(name, default)` declares a param and returns the `--set name=value` override
+  (parsed as `bool`, `int`, `float` or `str` like the default) or the default. It never
+  touches `scene.rng`.
+- `bouncekit batch <scene.py>` renders every seed x grid combination: `--seeds 1-3` or
+  `1,5,9`, `--grid name=v1,v2` (repeatable; the cartesian product), `--set` for fixed
+  overrides, `--duration`, `--jobs N` worker processes, `--out-dir DIR`, `--quiet`.
+  A failing job is reported and does not stop the others; the exit code is non-zero if any failed.
+- Names: `<out-dir>/<stem>_seed<seed>_<name>-<value>.mp4` (one `_name-value` per override).
+- Each MP4 gets a metadata `.json` beside it: `scene`, `video`, `seed`, `params`, `duration`,
+  `frames`, `fps`, `size`, `events` (counts per kind), `sound_triggers`, `versions`,
+  `render_seconds`. Everything but `render_seconds` is deterministic.
+- `scene.add_text(text, pos=, size=64, color=, start=0, end=None)` draws centred text
+  (a string or `f(scene) -> str`), visible from `start` to `end` seconds.
+- `render` and `batch` show a progress bar with an ETA on a terminal; `--quiet` hides it.
+
+See `examples/param_sweep.py`.
 
 ## CLI
 
