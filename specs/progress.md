@@ -42,6 +42,7 @@
 - 2026-10-24: T-303 done: `mido` added (runtime dep, mypy override); `audio/midi.py` `read_chords` (all tracks or one, percussion and velocity-0 excluded, equal-tick chords ascending, duplicate pitch keeps max velocity, ConfigError naming path/track/transpose); `S.melody`/`Melody` (identity-hashed, `(hz, velocity/127)` per note, 20 Hz..20 kHz check); `A.play`/`ctx.play` accept a `Melody`; `Scene._trigger` plays one chord per allowed hit (one NoteTrigger per note at one offset, gain × velocity, counted once for cap/retrigger, shared identity cursor, wraps); `scripts/make_assets.py [OUT_DIR]` (MIDI part) and committed `assets/midi/ode_to_joy.mid` (16 bars, 62 melody notes, bass note per bar); tests/test_melody.py; gate passes. Notes in design.md §M3.6.
 - 2026-10-24: T-304 done: `Sample` voice + `S.sample` (soundfile read, channel average, read-only data, linear-interp pitch shift with `ratio = (hz/root_hz)·(rate/48000)`, 1 ms attack / 5 ms release, peak 1, duration cap, ConfigError naming path/root/duration); `resolve_voice` accepts `Sample`; `Play.pan`/`ctx.play(pan=)` in [0, 1], `NoteTrigger.pan`, pan from event x in `Scene._trigger` (centred without a position), `pan_gains` (exact zero far channel, exact mirror), stereo accumulation with one common peak normalisation and the M1 path verbatim when nothing is panned; `scripts/make_assets.py` sample part and committed `assets/samples/kalimba.wav` (`.gitignore` exception); tests/test_sample.py, tests/test_pan.py; gate passes. Notes in design.md §M3.7.
 - 2026-10-24: T-305 done: Preview(watch=, reload=), poll_reload (0.5 s throttle, (mtime_ns, size)), _load keeps last good scene with stderr-once + title error, R via _load, window rebuilt on canvas change; cli/Scene.preview pass the watched path; existing cli/preview test fakes gained **_kw for the new kwargs; gate passes.
+- 2026-10-24: T-306 done: `examples/midi_melody.py` (glowing ring, hue-cycle trail+glow balls, `A.play(S.melody(ode_to_joy.mid, voice=S.sample(kalimba.wav)), pan=0.8)` + `A.particles` + `A.flash` + capped `A.split`), README M3 section, CLAUDE.md already covered; tests in tests/test_example.py; full-size 30 s render OK (h264 1080x1920@60, aac 48 kHz stereo, 52.7 s wall = 29 ms/frame incl. encode); benchmark scene median 35.6 ms/frame (100 trail+glow balls + ring), 45.8 ms/frame with 300 particles (NFR-303); suite ~41 s; gate passes.
 
 ## Traceability (requirement -> tests)
 
@@ -102,7 +103,9 @@
 | FR-201 (when-command frame) | test_destroy.py::test_events_from_when_commands_carry_the_simulated_frame |
 | FR-213 (destroy example) | test_example.py::test_destroy_example_exercises_wall_sound_and_spawn_cap |
 | NFR-204 | all M0/M1 tests unmodified and passing |
+| FR-311 / NFR-305 (example) | test_example.py: test_midi_melody_example_layout, test_midi_melody_render_has_stereo_aac, test_midi_melody_audio_is_stereo_and_triggers_follow_melody |
+| NFR-301 / NFR-303 (example, docs) | test_example.py::test_readme_covers_m3; tests/test_perf.py |
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 in progress: T-301..T-305 done; next T-306 (example, README, docs).
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done; next M4.

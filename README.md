@@ -141,6 +141,41 @@ every wall hit up to a cap), `examples/escape_rotating_gap.py` (balls escape a r
 gap and are replaced by two), `examples/destroy_on_contact.py` (a hazard destroys balls;
 `every` spawns more; `when` + `end_after` ends the video).
 
+## Effects and melody (M3)
+
+Visual effects never change physics; `A.particles` draws from `scene.fx_rng`, so the
+same seed still gives identical frames. Audio gets MIDI melodies, sample voices and panning.
+
+```python
+from bouncekit import colors as C
+
+scene.add_circle(center=(540, 960), radius=450, glow=1.0, tags={"wall"})
+scene.add_ball(pos=(540, 800), radius=22, color=C.hue_cycle(), trail=True, glow=1.0,
+               tags={"ball"})
+tune = S.melody("assets/midi/ode_to_joy.mid", voice=S.sample("assets/samples/kalimba.wav", root="A4"))
+scene.on_collision("ball", "wall", [A.play(tune, pan=0.8), A.particles(count=14)])
+```
+
+- `EffectsConfig(trail_seconds=0.3, glow_blur=18.0, max_particles=2000)`: pass as
+  `Scene(effects=EffectsConfig(...))`.
+- `add_ball(..., trail=True, glow=1.0)` leaves a fading trail and a blurred light (glow 0..4);
+  `add_circle(..., glow=)` lights the ring. Split and spawned balls inherit both.
+- `A.particles(count=12, speed=400, lifetime=0.5, size=3, color=None, drag=2, pos=None)` bursts
+  impact particles at the contact point; `ctx.particles(...)` does the same from a callback.
+- Colour modes (`from bouncekit import colors as C`): `C.fixed(c)`, `C.hue_cycle(start=, step=)`
+  (next hue per new ball), `C.by_speed(slow=, fast=)`, `C.by_generation(...)`; rings take plain colours.
+- `S.melody(path, voice=, track=None, transpose=0)` plays a MIDI file one chord per hit
+  and wraps; the hits set the rhythm. `S.sample(path, root="C4", duration=None)` is a voice
+  that pitch-shifts an audio file; use it as `voice=` of `S.note`, `S.scale` or `S.melody`.
+- `A.play(source, gain=1.0, pan=0.0)`: `pan` in [0, 1] places the note by the event's x
+  position (0 centred, 1 full left-to-right width).
+- Preview hot-reload: `bouncekit preview scene.py` watches the file and reloads on save;
+  errors in the script are shown and the last good scene keeps running.
+- `uv run python scripts/make_assets.py` regenerates `assets/midi/ode_to_joy.mid` and
+  `assets/samples/kalimba.wav` deterministically.
+
+See `examples/midi_melody.py` (`uv run bouncekit render examples/midi_melody.py`).
+
 ## CLI
 
 `bouncekit render <scene.py> [--seed N] [--duration S] [--out PATH]` and

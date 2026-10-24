@@ -264,3 +264,71 @@ def test_readme_covers_m2() -> None:
     for word in ("on_collision", "on_escape", "every", "when", "A.split", "A.spawn",
                  "A.destroy", "end_after", "ctx"):  # fmt: skip
         assert word in text
+
+
+# --- T-306: MIDI melody example (FR-311, NFR-301, NFR-303, NFR-305) ---
+
+MELODY_EXAMPLE = EXAMPLE.parent / "midi_melody.py"
+
+
+def test_midi_melody_example_layout() -> None:
+    from bouncekit import actions as A
+    from bouncekit import colors as C
+    from bouncekit import sound as S
+
+    scene = load_scene(MELODY_EXAMPLE, seed=42)
+    rings = [o for o in scene.objects if isinstance(o, CircleBoundary)]
+    balls = [o for o in scene.objects if isinstance(o, Ball)]
+    assert rings and all(r.glow > 0 for r in rings)
+    assert balls
+    for b in balls:
+        assert b.trail and b.glow > 0 and isinstance(b.hue_mode, C.HueCycle)
+    handlers = [h for r in scene._engine.rules for h in r.handlers]
+    plays = [h for h in handlers if isinstance(h, A.Play) and isinstance(h.source, S.Melody)]
+    assert plays and all(p.pan > 0 for p in plays)
+    assert any(isinstance(h, A.Particles) for h in handlers)
+
+
+def test_midi_melody_render_has_stereo_aac(tmp_path: Path) -> None:
+    out = tmp_path / "melody.mp4"
+    args = ["render", str(MELODY_EXAMPLE), "--seed", "42", "--duration", "3", "--out", str(out)]
+    assert main(args) == 0
+    probe = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "stream=codec_name,sample_rate,channels",
+         "-of", "json", str(out)],
+        capture_output=True, text=True, check=True,
+    )  # fmt: skip
+    streams = {s["codec_name"]: s for s in json.loads(probe.stdout)["streams"]}
+    assert set(streams) == {"h264", "aac"}
+    assert int(streams["aac"]["sample_rate"]) == 48000 and streams["aac"]["channels"] == 2
+
+
+def test_midi_melody_audio_is_stereo_and_triggers_follow_melody() -> None:
+    import numpy as np
+
+    from bouncekit import sound as S
+
+    scene = load_scene(MELODY_EXAMPLE, seed=42)
+    for _ in range(min(scene.total_frames, 480)):
+        scene.step_frame()
+    audio = scene.audio_buffer()
+    assert audio.ndim == 2 and audio.shape[1] == 2
+    assert not np.array_equal(audio[:, 0], audio[:, 1])
+    melody = next(
+        h.source
+        for r in scene._engine.rules
+        for h in r.handlers
+        if hasattr(h, "source") and isinstance(h.source, S.Melody)
+    )
+    expected = [hz for chord in melody.chords for hz, _ in chord]
+    got = [t.hz for t in scene.triggers]
+    n = min(len(got), 8)
+    assert n >= 3
+    assert got[:n] == expected[:n]
+
+
+def test_readme_covers_m3() -> None:
+    text = (EXAMPLE.parent.parent / "README.md").read_text()
+    for word in ("trail", "glow", "A.particles", "C.hue_cycle", "S.melody", "S.sample",
+                 "pan", "EffectsConfig", "hot-reload"):  # fmt: skip
+        assert word in text
