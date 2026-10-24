@@ -73,9 +73,133 @@ class Sine:
         return out
 
 
-Voice = Sine
+@dataclass(frozen=True)
+class Triangle:
+    """Triangle oscillator from phase 0 shaped by an :class:`ADSR` envelope."""
 
-VOICES: dict[str, Voice] = {"sine": Sine()}
+    duration: float = 0.8
+    envelope: ADSR = field(default_factory=ADSR)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "duration", _positive_number("duration", self.duration))
+        if not isinstance(self.envelope, ADSR):
+            raise ConfigError(f"envelope must be an ADSR; got {self.envelope!r}")
+
+    def render(self, hz: float, seed: int) -> NDArray[np.float64]:
+        """Render one note at ``hz`` (``seed`` is unused: the triangle is deterministic)."""
+        n = round(self.duration * SAMPLE_RATE)
+        t = np.arange(n, dtype=np.float64) / SAMPLE_RATE
+        # Same shape as 2/pi * arcsin(sin(2 pi f t)), computed exactly: 0 at t=0, rising.
+        x = hz * t + 0.25
+        wave = 1.0 - 4.0 * np.abs(x - np.floor(x) - 0.5)
+        out: NDArray[np.float64] = wave * self.envelope.curve(n, self.duration)
+        return out
+
+
+_PLUCK_ATTACK = SAMPLE_RATE * 2 // 1000  # 2 ms
+_MARIMBA_ATTACK = SAMPLE_RATE // 1000  # 1 ms
+_MARIMBA_PARTIALS = ((1.0, 1.0, 1.0), (3.93, 0.35, 3.0), (9.3, 0.1, 8.0))
+"""(frequency ratio, amplitude, decay divisor) per partial."""
+_NYQUIST_LIMIT = 20_000.0
+
+
+@dataclass(frozen=True)
+class Pluck:
+    """Karplus-Strong plucked string.
+
+    ``damping`` in (0, 1) is the per-period loss of the feedback loop: closer to 1
+    rings longer. The excitation noise is seeded from ``(seed, hz, damping)`` only,
+    so equal inputs give bit-identical notes.
+    """
+
+    duration: float = 1.5
+    damping: float = 0.996
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "duration", _positive_number("duration", self.duration))
+        damping = self.damping
+        if (
+            isinstance(damping, bool)
+            or not isinstance(damping, int | float)
+            or not math.isfinite(damping)
+            or not 0.0 < damping < 1.0
+        ):
+            raise ConfigError(f"damping must be a number in (0, 1); got {damping!r}")
+        object.__setattr__(self, "damping", float(damping))
+
+    def render(self, hz: float, seed: int) -> NDArray[np.float64]:
+        """Render one plucked note at ``hz`` with noise seeded from ``seed``."""
+        n = round(self.duration * SAMPLE_RATE)
+        # The two-tap average adds half a sample of delay: loop period = period + 0.5.
+        period = max(2, round(SAMPLE_RATE / hz - 0.5))
+        rng = np.random.default_rng(
+            [seed % 2**32, round(hz * 1000), round(self.damping * 1_000_000)]
+        )
+        y = np.zeros(max(n, period + 1), dtype=np.float64)
+        noise = rng.uniform(-1.0, 1.0, period)
+        y[:period] = noise - noise.mean()
+        y[period] = self.damping * 0.5 * y[0]
+        k = self.damping * 0.5
+        i = period + 1
+        while i < len(y):
+            j = min(i + period, len(y))
+            y[i:j] = k * (y[i - period : j - period] + y[i - period - 1 : j - period - 1])
+            i = j
+        y = y[:n]
+        if n == 0:
+            return y
+        ramp = min(_PLUCK_ATTACK, n)
+        y[:ramp] *= np.arange(ramp, dtype=np.float64) / _PLUCK_ATTACK
+        y[0] = 0.0
+        return _normalise(y)
+
+
+@dataclass(frozen=True)
+class Marimba:
+    """Struck bar: decaying sine partials at 1, 3.93 and 9.3 times ``hz``.
+
+    ``decay`` is the fundamental's exponential time constant in seconds; the upper
+    partials decay 3 and 8 times faster. Partials above 20 kHz are omitted.
+    """
+
+    duration: float = 1.2
+    decay: float = 0.35
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "duration", _positive_number("duration", self.duration))
+        object.__setattr__(self, "decay", _positive_number("decay", self.decay))
+
+    def render(self, hz: float, seed: int) -> NDArray[np.float64]:
+        """Render one note at ``hz`` (``seed`` is unused: the marimba is deterministic)."""
+        n = round(self.duration * SAMPLE_RATE)
+        t = np.arange(n, dtype=np.float64) / SAMPLE_RATE
+        y = np.zeros(n, dtype=np.float64)
+        for ratio, amp, divisor in _MARIMBA_PARTIALS:
+            f = hz * ratio
+            if f > _NYQUIST_LIMIT:
+                continue
+            y += amp * np.exp(-t * divisor / self.decay) * np.sin(2.0 * math.pi * f * t)
+        ramp = min(_MARIMBA_ATTACK, n)
+        y[:ramp] *= np.arange(ramp, dtype=np.float64) / _MARIMBA_ATTACK
+        return _normalise(y)
+
+
+def _normalise(y: NDArray[np.float64]) -> NDArray[np.float64]:
+    peak = float(np.abs(y).max()) if len(y) else 0.0
+    if peak > 0.0:
+        y /= peak
+    return y
+
+
+Voice = Sine | Triangle | Pluck | Marimba
+
+VOICES: dict[str, Voice] = {
+    "sine": Sine(),
+    "triangle": Triangle(),
+    "pluck": Pluck(),
+    "marimba": Marimba(),
+}
+_VOICE_TYPES = (Sine, Triangle, Pluck, Marimba)
 
 
 def resolve_voice(voice: object) -> Voice:
@@ -91,6 +215,6 @@ def resolve_voice(voice: object) -> Voice:
             raise ConfigError(
                 f"voice must be one of {', '.join(sorted(VOICES))}; got {voice!r}"
             ) from None
-    if isinstance(voice, Sine):
+    if isinstance(voice, _VOICE_TYPES):
         return voice
     raise ConfigError(f"voice must be a voice name or voice instance; got {voice!r}")

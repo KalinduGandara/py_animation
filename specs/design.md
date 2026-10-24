@@ -343,7 +343,7 @@ Cursor state lives in the scene (`dict[Scale, int]`, `Scale` hashes by identity)
 
 Voices (`render(hz, seed)`, `n = round(duration × 48000)` samples, `t = arange(n) / 48000`):
 - `Sine`/`Triangle`: oscillator from phase 0 (`sin`, or `2/π · arcsin(sin)`) × ADSR (`attack` ramp from 0, `decay` to `sustain`, hold, `release` to 0 ending at `duration`; if `attack + decay + release > duration` scale the three to fit).
-- `Pluck`: Karplus-Strong. Delay length `N = max(2, round(48000 / hz))`; initial buffer = uniform noise in [−1, 1] from `default_rng([seed % 2**32, round(hz * 1000), round(damping * 1e6)])`, mean removed; loop `y[i] = damping · 0.5 · (y[i−N] + y[i−N−1])` in vectorised blocks of `N`; `y[0] = 0`; 2 ms attack ramp; normalised to peak 1.
+- `Pluck`: Karplus-Strong. Delay length `N = max(2, round(48000 / hz − 0.5))` (T-102 deviation: the two-tap average adds half a sample of loop delay, so `round(48000 / hz)` played 880 Hz 1.7 % flat; now ≤ 0.4 % off for 220–880 Hz); initial buffer = uniform noise in [−1, 1] from `default_rng([seed % 2**32, round(hz * 1000), round(damping * 1e6)])`, mean removed; loop `y[i] = damping · 0.5 · (y[i−N] + y[i−N−1])` in vectorised blocks of `N`; `y[0] = 0`; 2 ms attack ramp; normalised to peak 1.
 - `Marimba`: partials at ratios 1, 3.93 (+−) and 9.3 with amplitudes 1, 0.35, 0.1 and decay times `decay`, `decay/3`, `decay/8`; 1 ms attack; partials above 20 kHz omitted; normalised to peak 1.
 
 ### M1.7 Export (FR-109)
@@ -374,6 +374,7 @@ AAC encoder delay is recorded by ffmpeg as an edit list in MP4, so players align
 
 - `SAMPLE_RATE` lives in `audio/voices.py` (voices need it and the mixer imports voices); `audio/mixer.py` re-exports it, so `from bouncekit.audio.mixer import SAMPLE_RATE` works as designed.
 - Staged within M1: after T-101 `VOICES` holds only `"sine"`, `Source = Note`, `AudioConfig` validates only `peak_dbfs` (and `SceneConfig.audio`'s type), and `_dispatch` applies no trigger policy (gain = `play.gain`, no polyphony limit). T-102/T-103 add the rest.
+- T-102: `Triangle` uses the exact piecewise-linear form `1 − 4·|frac(hz·t + ¼) − ½|` (identical shape to `2/π · arcsin(sin)`, exact 0 at t = 0). `Pluck` treats `y[−1]` as 0 for the first output sample. Pitch tests measure the fundamental by autocorrelation, because a plucked string's loudest partial can be a harmonic.
 - `EventRecorder` stores `owners: dict[Shape, (index, object)]` itself (instead of `Scene._owner`); lookup only, never iterated.
 - Temp dir for muxing is `.bouncekit-*` inside `out.parent`.
 

@@ -9,16 +9,28 @@ import math
 import re
 from dataclasses import dataclass
 
-from bouncekit.audio.voices import ADSR, VOICES, Sine, Voice, resolve_voice
+from bouncekit.audio.voices import (
+    ADSR,
+    VOICES,
+    Marimba,
+    Pluck,
+    Sine,
+    Triangle,
+    Voice,
+    resolve_voice,
+)
 from bouncekit.errors import ConfigError
 
 __all__ = [
     "ADSR",
     "VOICES",
+    "Marimba",
     "Note",
     "Pitch",
+    "Pluck",
     "Sine",
     "Source",
+    "Triangle",
     "Voice",
     "VoiceLike",
     "note",
@@ -84,8 +96,8 @@ Source = Note
 def note(pitch: Pitch, *, voice: VoiceLike = "sine") -> Note:
     """Return a source that always plays ``pitch`` with ``voice``.
 
-    ``voice`` is a voice name (``"sine"``) or a voice instance such as
-    ``Sine(duration=0.3)``.
+    ``voice`` is a voice name (``"sine"``, ``"triangle"``, ``"pluck"``,
+    ``"marimba"``) or a voice instance such as ``Pluck(duration=0.5)``.
 
     Raises:
         ConfigError: for a bad pitch or an unknown voice.

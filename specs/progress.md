@@ -25,6 +25,7 @@
 
 - 2026-10-24: M1 planned: requirements FR-101..FR-110 / NFR-101..NFR-105, design §M1, tasks T-101..T-104, assumptions B1..B15. Probe: pymunk 7.3.1 `begin` sees pre-impulse velocities; a seam hit fires two `begin`s in one substep (merged per object pair).
 - 2026-10-24: T-101 done: events.py (`EventRecorder` wildcard begin/separate, per-pair contact count + per-step merge), sound.py (`pitch_to_hz`, `note`), actions.py (`play`), audio/voices.py (`ADSR`, `Sine`), audio/mixer.py (`sample_offset`, `num_samples`, `mix`: tanh + normalise + 5 ms fade), export/audio.py (`write_wav`), ffmpeg `mux`, `AudioConfig`, `Scene.on_collision/events/triggers/has_sound/audio_buffer`, render muxes AAC when sound rules exist; `soundfile` added (mypy override: no stubs). Probe: seam landing = 2 begins -> 1 event; rolling 3 s = 85 begins -> 1 event. Tests: test_events/test_sound/test_mixer/test_audio_export; gate passes (~8 s).
+- 2026-10-24: T-102 done: audio/voices.py `Triangle` (exact triangle x ADSR), `Pluck` (Karplus-Strong, vectorised per period, noise from `default_rng([seed, hz, damping])`, delay `round(48000/hz - 0.5)` to cancel the averaging filter's half-sample lag), `Marimba` (partials 1/3.93/9.3, >20 kHz dropped); `Voice` union, `VOICES` has 4 names, `resolve_voice` accepts all types; sound.py re-exports them; mixer's `(voice, hz, seed)` cache verified (one render per key). tests/test_voices.py (pitch by autocorrelation within 2% at 220/440/880 Hz); gate passes.
 
 ## Traceability (requirement -> tests)
 
@@ -49,16 +50,16 @@
 | NFR-006 | test_example.py::test_readme_has_quickstart_and_api (docstrings by review) |
 | NFR-007 | full suite ~6 s (no automated check) |
 | FR-101 | test_events.py: test_drop_event_step_time_and_speed_are_analytic, test_one_event_per_seam_hit, test_no_events_while_resting_after_settling, test_no_events_while_rolling_across_seams, test_handler_never_mutates_the_space |
-| FR-102 | test_sound.py: test_pitch_to_hz, test_octave_range_bounds, test_bad_pitch_raises, test_note_source, test_note_rejects_bad_voice |
+| FR-102 | test_voices.py::test_voice_name_lookup; test_sound.py: test_pitch_to_hz, test_octave_range_bounds, test_bad_pitch_raises, test_note_source, test_note_rejects_bad_voice |
 | FR-104 | test_events.py: test_rule_produces_trigger_per_matching_event, test_rules_fire_in_registration_order, test_scene_without_rules_has_no_sound, test_on_collision_rejects_bad_input; test_sound.py::test_play_action |
-| FR-105 (Sine) | test_sound.py: test_sine_voice_render, test_sine_validation, test_adsr_validation |
+| FR-105 | test_sound.py: test_sine_voice_render, test_sine_validation, test_adsr_validation; test_voices.py: test_render_shape_start_peak_finite, test_dominant_frequency_within_two_percent, test_triangle_is_a_triangle_wave, test_pluck_same_seed_and_pitch_identical_different_seed_differs, test_pluck_decays, test_marimba_drops_partials_above_20khz, test_parameter_validation_names_field, test_render_cache_one_render_per_key |
 | FR-107 | test_mixer.py: test_sample_offset, test_num_samples, test_isolated_note_starts_exactly_at_offset, test_quiet_mix_is_normalised_to_peak_dbfs, test_silence_stays_zero_and_end_is_faded, test_samples_past_the_end_are_dropped, test_scene_audio_buffer_length_follows_simulated_frames |
 | FR-108 (partial) | test_mixer.py::test_audio_config_defaults_and_scene |
 | FR-109 | test_audio_export.py: test_write_wav_float32_roundtrip, test_render_with_sound_muxes_aac, test_render_without_sound_rules_has_no_audio_stream, test_temp_files_removed_when_mux_fails, test_mux_failure_raises_with_stderr, test_mux_command_flags |
-| NFR-101 | test_events.py: test_same_seed_identical_events_and_audio, test_different_seed_differs; test_mixer.py::test_mix_is_deterministic |
+| NFR-101 | test_events.py: test_same_seed_identical_events_and_audio, test_different_seed_differs; test_mixer.py::test_mix_is_deterministic; test_voices.py::test_mix_with_every_voice_is_deterministic |
 | NFR-102 | test_mixer.py::test_isolated_note_starts_exactly_at_offset; test_audio_export.py::test_render_with_sound_muxes_aac (durations within 50 ms) |
 | NFR-103 | test_mixer.py::test_two_hundred_full_gain_triggers_respect_headroom |
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) in progress: T-101 done; next: T-102.
+M0 complete and reviewed. M1 (audio) in progress: T-101, T-102 done; next: T-103.
