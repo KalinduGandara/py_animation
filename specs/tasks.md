@@ -37,7 +37,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: render/preview.py, scene.py, tests/test_preview.py
   - Done when: preview runs headless (`SDL_VIDEODRIVER=dummy`) for N frames via a `max_frames` hook; key handling unit-tested via posted events (pause, step, restart, quit).
 
-- [ ] T-008: Example scene, README, end-to-end verification.
+- [x] T-008: Example scene, README, end-to-end verification.
   - Requirements: FR-011, NFR-002, NFR-006, NFR-007
   - Files: examples/single_ball.py, README.md
   - Done when: `uv run bouncekit render examples/single_ball.py` produces `out/single_ball_seed42.mp4` that ffprobe reports as 1080×1920, 60 fps, h264, yuv420p; README has quickstart + API overview; full suite < 60 s.

@@ -11,7 +11,8 @@
 - 2026-10-24: T-005 done: export/ffmpeg.py (`require_ffmpeg`, `FfmpegWriter` with frame-length and stderr-tail errors), `Scene.render` (checks ffmpeg before simulating, creates parent dirs); tests/test_export.py incl. real ffprobe check; gate passes.
 - 2026-10-24: T-006 done: cli.py (`load_scene` via runpy with `_overrides`, `render`/`preview` subcommands, `default_scene` for `Scene.run`, errors -> `error: ...` exit 2), `SceneLoadError`, `Scene.run`, `run_preview` placeholder; tests/test_cli.py + tests/fixtures; gate passes.
 - 2026-10-24: T-007 done: render/preview.py (`Preview` class with handle_event/tick/run, `run_preview(make_scene, scale, max_frames)` returns final scene), `Scene.preview` (restart reloads `sys.argv[0]` with same seed/duration); tests/test_preview.py headless; gate passes.
+- 2026-10-24: T-008 done: examples/single_ball.py, README (quickstart + API), tests/test_example.py incl. ffprobe 1080x1920/60fps/h264/yuv420p; full suite ~6 s; gate passes.
 
 ## Status
 
-In progress: M0. Next: T-008.
+M0 complete (T-001..T-008). Next: M1 planning.
