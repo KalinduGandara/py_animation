@@ -2,7 +2,6 @@
 
 import random
 import sys
-import warnings
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 
@@ -10,7 +9,7 @@ import pymunk
 
 from bouncekit.colors import ColorLike
 from bouncekit.config import SceneConfig, Vec
-from bouncekit.errors import TunnellingWarning
+from bouncekit.errors import ConfigError
 from bouncekit.export.ffmpeg import FfmpegWriter, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
@@ -103,10 +102,8 @@ class Scene:
         ``angular_velocity`` is in degrees per second, positive = clockwise.
 
         Raises:
-            ConfigError: if any option is invalid.
-
-        Warns:
-            TunnellingWarning: if a ball at ``max_speed`` could pass through a ring.
+            ConfigError: if any option is invalid, or a ball at ``max_speed`` could
+                pass through a ring in one step (see ``_check_tunnelling``).
         """
         ring = CircleBoundary(
             self.space,
@@ -139,10 +136,8 @@ class Scene:
         """Add a dynamic ball; its speed is clamped to ``config.max_speed``.
 
         Raises:
-            ConfigError: if any option is invalid.
-
-        Warns:
-            TunnellingWarning: if a ball at ``max_speed`` could pass through a ring.
+            ConfigError: if any option is invalid, or a ball at ``max_speed`` could
+                pass through a ring in one step (see ``_check_tunnelling``).
         """
         ball = Ball(
             self.space,
@@ -160,23 +155,19 @@ class Scene:
         return ball
 
     def _check_tunnelling(self, ball: Ball, ring: CircleBoundary) -> None:
-        """Warn about a ball/ring pair that a ball at ``max_speed`` could pass through.
+        """Reject a ball/ring pair that a ball at ``max_speed`` could pass through.
 
         A collision is caught only if the ball cannot move past a segment's centre
         line in one step, so per-step travel must be below ``radius + thickness / 2``.
-        This is a warning, not an error: ``max_speed`` is a worst case that many
-        scenes never reach.
         """
         travel = self.config.max_speed * self._dt
         reach = ball.radius + ring.thickness / 2
         if travel >= reach:
-            warnings.warn(
+            raise ConfigError(
                 f"ball radius {ball.radius} with ring thickness {ring.thickness} could tunnel: "
                 f"at max_speed {self.config.max_speed} a ball moves {travel:.2f} px per step "
                 f"but radius + thickness/2 is only {reach:.2f} px; increase substeps, "
-                f"lower max_speed, or use a larger ball or thicker ring",
-                TunnellingWarning,
-                stacklevel=3,
+                f"lower max_speed, or use a larger ball or thicker ring"
             )
 
     def step_frame(self) -> None:

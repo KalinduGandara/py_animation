@@ -1,5 +1,6 @@
 """Rendering tests: renderer primitives, scene drawing, frames (FR-008, NFR-004)."""
 
+import math
 import os
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -27,6 +28,7 @@ def _scene(**kw: object) -> Scene:
         "duration": 0.5,
         "background": BG,
         "gravity": (0.0, 0.0),
+        "max_speed": 2000.0,
     }
     opts.update(kw)
     return Scene(**opts)  # type: ignore[arg-type]
@@ -192,3 +194,57 @@ def test_draw_alone_leaves_state_unchanged() -> None:
     s.draw(r)
     assert _state(s) == before
     assert s.frame == 5
+
+
+# --- Anti-aliasing (FR-008: smooth edges) ------------------------------------
+
+
+def _gray(data: bytes, width: int, x: int, y: int) -> int:
+    return _pixel(data, width, x, y)[0]
+
+
+def _expected(d: float) -> int:
+    """White-on-black value for a pixel whose centre is ``d`` px outside an edge."""
+    return round(255 * min(max(0.5 - d, 0.0), 1.0))
+
+
+def test_full_ring_matches_analytic_coverage() -> None:
+    r = PygameRenderer(200, 200)
+    r.clear((0, 0, 0))
+    r.arc((100, 100), 80, 8, 0, 360, (255, 255, 255))
+    data = r.to_rgb_bytes()
+    partial = 0
+    for y in range(200):
+        for x in range(200):
+            dist = abs(math.hypot(x + 0.5 - 100, y + 0.5 - 100) - 80) - 4
+            got = _gray(data, 200, x, y)
+            assert abs(got - _expected(dist)) <= 1, (x, y, got)
+            partial += 0 < got < 255
+    assert partial > 500  # edges really are blended, not stair-stepped
+
+
+def test_circle_edge_matches_analytic_coverage() -> None:
+    r = PygameRenderer(64, 64)
+    r.clear((0, 0, 0))
+    r.circle((31.3, 32.7), 20, (255, 255, 255))
+    data = r.to_rgb_bytes()
+    for y in range(64):
+        for x in range(64):
+            dist = math.hypot(x + 0.5 - 31.3, y + 0.5 - 32.7) - 20
+            assert abs(_gray(data, 64, x, y) - _expected(dist)) <= 1, (x, y)
+
+
+def test_gap_arc_ends_at_physics_segment_ends() -> None:
+    s = _scene(width=200, height=200, background=(0, 0, 0))
+    ring = s.add_circle(center=(100, 100), radius=80, thickness=8, gap_degrees=60,
+                        color=(255, 255, 255))
+    r = PygameRenderer(200, 200)
+    s.draw(r)
+    data = r.to_rgb_bytes()
+    for end, toward_gap in ((ring.shapes[0].a, -1), (ring.shapes[-1].b, 1)):
+        p = ring.body.local_to_world(end)
+        assert _gray(data, 200, int(p.x), int(p.y)) > 200  # cap centre is drawn
+        # A point 2 px beyond the cap (thickness/2 = 4) along the gap is empty.
+        ang = math.atan2(p.y - 100, p.x - 100)
+        q = ang + toward_gap * (4 + 2.5) / 80
+        assert _gray(data, 200, int(100 + 80 * math.cos(q)), int(100 + 80 * math.sin(q))) < 40

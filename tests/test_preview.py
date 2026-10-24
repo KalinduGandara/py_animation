@@ -12,7 +12,8 @@ from bouncekit.render.preview import Preview, run_preview
 
 
 def make_scene() -> Scene:
-    scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=3, gravity=(0.0, 100.0))
+    scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=3, gravity=(0.0, 100.0),
+                  max_speed=1500)
     scene.add_circle(center=(32, 24), radius=20, segments=32)
     scene.add_ball(pos=(32, 24), radius=4, velocity=(30.0, 10.0))
     return scene
@@ -130,3 +131,22 @@ def test_scene_preview_runs_headless(monkeypatch: pytest.MonkeyPatch) -> None:
     s = make_scene()
     s.preview(scale=0.5)
     assert seen == [s]
+
+
+class _SlowClock:
+    """Fake clock that records pacing calls and pretends every frame ran late."""
+
+    def __init__(self) -> None:
+        self.ticks: list[int] = []
+
+    def tick(self, fps: int = 0) -> int:
+        self.ticks.append(fps)
+        return 1000  # 1 s per frame: far behind real time
+
+
+def test_paced_at_scene_fps_and_never_skips_steps(preview: "Preview") -> None:
+    clock = _SlowClock()
+    preview.clock = clock  # type: ignore[assignment]
+    preview.run(max_frames=5)
+    assert clock.ticks == [preview.scene.config.fps] * 5
+    assert preview.scene.frame == 5  # one step per displayed frame despite lag

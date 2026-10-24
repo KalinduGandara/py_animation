@@ -51,6 +51,7 @@ As a scene author, I add a ball with `scene.add_ball(pos, radius, velocity=(0,0)
 
 ### FR-008 Rendering visuals — [Stack], [Arch], [C10]
 - THE SYSTEM SHALL draw the background colour, each ring (with its gap and current rotation) and each ball in its colour, using anti-aliased primitives.
+- Edges SHALL be smooth: every pixel's value SHALL equal the analytic one-pixel coverage of the shape (`clip(0.5 − signed distance, 0, 1)`) within ±1 level; rings SHALL be drawn as true arcs (not chords) whose gap ends are round caps at the physics segment end points. (Added 2026-10-24 after user saw jagged ring edges.)
 - All drawing SHALL go through a `Renderer` interface; the pygame-ce backend is the only implementation in M0.
 
 ### FR-009 Live preview — [Stack], [P2], [C8]
@@ -76,7 +77,7 @@ As a scene author, I add a ball with `scene.add_ball(pos, radius, velocity=(0,0)
 
 - **NFR-001 Determinism** [P1], [M0], [C6], [C7]: Rendering the same scene with the same seed twice on the same machine with the locked dependencies SHALL yield identical SHA-256 hashes for every raw RGB frame. Verified by an automated test.
 - **NFR-002 Output format** [M0]: The example render SHALL be 1080×1920, 60 fps, H.264 yuv420p (verified with ffprobe).
-- **NFR-003 No tunnelling** [Phys]: WHEN `ball.radius + ring.thickness / 2 > max_speed / (fps × substeps)`, a ball at `max_speed` SHALL NOT pass through the ring (verified by a test running a fast ball for several seconds and checking it stays inside). WHEN a ball/ring pair violates that condition, THE SYSTEM SHALL emit a `TunnellingWarning` naming the fix (more substeps, lower max_speed, bigger ball, thicker ring). It is a warning, not an error, because `max_speed` is a worst case many scenes never reach. (Changed after review, 2026-10-24.)
+- **NFR-003 No tunnelling** [Phys]: WHEN `ball.radius + ring.thickness / 2 > max_speed / (fps × substeps)`, a ball at `max_speed` SHALL NOT pass through the ring (verified by a test running a fast ball for several seconds). WHEN a ball/ring pair violates that condition, `add_ball`/`add_circle` SHALL raise `ConfigError` naming the fix (more substeps, lower max_speed, bigger ball, thicker ring). (User decision 2026-10-24: error, not warning.)
 - **NFR-004 Decoupling** [P3]: The renderer SHALL only read world state; rendering a frame SHALL NOT change physics state (verified by test: physics state with and without rendering is identical).
 - **NFR-005 Tooling** [Stack], [Eng]: Python ≥ 3.11 via uv, type hints throughout; `pytest`, `ruff check`, and `mypy` pass.
 - **NFR-006 Docs** [Eng]: Public API has docstrings; `README.md` has quickstart + API overview.

@@ -101,7 +101,7 @@ class Renderer(Protocol):
     def to_rgb_bytes(self) -> bytes                                              # width*height*3
 ```
 
-The ring draws each present segment with `thick_line`; round caps (a filled circle of radius width/2 at each end) make consecutive segments join seamlessly and match the physics shape (segment radius = thickness/2). A future skia backend implements the same four methods.
+The ring draws one true `arc` spanning its present segments (start = first segment's start vertex, end = last segment's end vertex, plus the body rotation); a full ring when nothing is omitted. The pygame backend draws `circle`, `thick_line` and `arc` with signed-distance coverage in numpy (`clip(0.5 − d, 0, 1)` blended into `surfarray.pixels3d`), evaluated only in the shape's bounding box (arcs pre-filter to pixels within `width/2 + 1` of the circle). Chosen after the per-segment quad drawing looked visibly jagged; pygame's `aacircle` also showed stair-steps. ~16 ms per 1080×1920 frame for a ring + ball. A future skia backend implements the same methods.
 
 ### 4.3 ffmpeg (export/ffmpeg.py)
 
@@ -139,7 +139,7 @@ Implementation notes (T-007): logic lives in a `Preview` class (`handle_event`, 
 - Ball: `Body(mass, moment)` with mass = π·r² (density 1), `moment_for_circle`; `Circle` with `elasticity`, `friction = 0`. Velocity clamp: `Scene.step_frame` calls `ball.clamp_speed(max_speed)` for every ball after **each** `space.step`. (Changed after review: a clamp in `velocity_func` missed collision impulses, which Chipmunk applies after velocity integration, so speeds reached ~4100 px/s against a spinning ring.)
 - Ring: kinematic `Body` at `center`, `angular_velocity = radians(deg_per_s)` (pymunk positive angle = clockwise on screen because +y is down). Segment endpoints at angles `θ_k = 2πk/N` in body-local coords; segment k is skipped if its midpoint angle (normalised to (−180°, 180°]) has |angle| < gap/2. Consecutive present segments get `set_neighbors` for smooth seams. Each segment has `radius = thickness/2`, `elasticity`, `friction = 0`.
 - Effective elasticity in pymunk is the product of both shapes; defaults 1.0 × 1.0 = 1.0.
-- Tunnelling: a collision is caught only if the ball cannot cross a segment's centre line in one step, i.e. `max_speed·dt < ball.radius + thickness/2`. At 4000 px/s and dt = 1/480 s that is 8.33 px, so with an 8 px ring the ball radius must be > 4.33 px (review measured: r=4 escapes 5/8 runs, r=5 escapes 0/8). `add_ball`/`add_circle` check every new ball/ring pair and emit `TunnellingWarning` (in `errors.py`, exported from the package) when violated. NFR-003 tests the safe case; a test checks the warning.
+- Tunnelling: a collision is caught only if the ball cannot cross a segment's centre line in one step, i.e. `max_speed·dt < ball.radius + thickness/2`. At 4000 px/s and dt = 1/480 s that is 8.33 px, so with an 8 px ring the ball radius must be > 4.33 px (review measured: r=4 escapes 5/8 runs, r=5 escapes 0/8). `add_ball`/`add_circle` check every new ball/ring pair and raise `ConfigError` when violated (user decision: error, not warning). NFR-003 tests the safe case; tests check the error in both insertion orders.
 
 ## 6. Determinism strategy (NFR-001)
 

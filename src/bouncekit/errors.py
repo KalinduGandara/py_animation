@@ -13,9 +13,5 @@ class FfmpegError(BouncekitError):
     """ffmpeg is missing or failed while encoding."""
 
 
-class TunnellingWarning(UserWarning):
-    """A ball moving at ``max_speed`` could pass straight through a ring."""
-
-
 class SceneLoadError(BouncekitError):
     """A scene file is missing or does not define exactly one ``Scene``."""

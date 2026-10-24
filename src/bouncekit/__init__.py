@@ -6,7 +6,7 @@ import os
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 from bouncekit import colors
-from bouncekit.errors import ConfigError, TunnellingWarning
+from bouncekit.errors import ConfigError
 from bouncekit.scene import Scene
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -18,7 +18,6 @@ __all__ = [
     "CircleBoundary",
     "ConfigError",
     "Scene",
-    "TunnellingWarning",
     "__version__",
     "colors",
 ]

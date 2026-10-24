@@ -21,6 +21,8 @@
   5. Example test now asserts ring centre/radius and gravity.
 - 2026-10-24: Verified: 184 tests pass (~6 s), ruff + mypy strict clean; `bouncekit render examples/single_ball.py` -> 1080x1920 h264 yuv420p 60/1, 600 frames; two separate-process renders produce byte-identical MP4s; seed 7 differs.
 
+- 2026-10-24: User review of M0: (a) tunnelling -> `ConfigError` (test scenes given honest `max_speed` values for their slow balls); (b) jagged ring fixed: new `Renderer.arc`, SDF anti-aliasing for circle/thick_line/arc, tests compare every pixel to analytic coverage; (c) added tests for CRF 18/+faststart flags + moov-before-mdat, and preview pacing (ticks at fps, one step per displayed frame even when lagging). ruff/mypy kept.
+
 ## Traceability (requirement -> tests)
 
 | Req | Tests |
@@ -31,14 +33,14 @@
 | FR-004 | test_world.py: test_ball_properties, test_closed_ring_contains_ball; test_config.py::test_add_ball_validation |
 | FR-005 | test_world.py: test_one_frame_is_substeps_fixed_steps, test_step_and_frame_counting, test_speed_clamp_keeps_direction, test_speed_clamp_under_gravity_uses_config, test_speed_clamped_after_collisions_with_spinning_ring; test_render.py: test_frames_first_frame_is_initial_state_then_steps, test_frames_yields_total_frames_of_right_size. "No wall-clock" verified by code review only. |
 | FR-006 | test_world.py: test_rng_seeded_from_seed, test_overrides_applied_before_rng |
-| FR-007 | test_export.py: test_writer_real_encode, test_scene_render, test_require_ffmpeg_missing, test_writer_missing_ffmpeg, test_scene_render_fails_before_simulating, test_writer_ffmpeg_failure_includes_stderr, test_writer_bad_frame_length; test_cli.py: test_render_default_out_path, test_render_default_out_uses_script_seed, test_missing_ffmpeg_exit_code. **Untested:** CRF 18 / +faststart flags (moov-before-mdat checked manually) |
-| FR-008 | test_render.py: test_renderer_satisfies_protocol, test_clear_fills_frame_and_size, test_circle_fills_inside_only, test_thick_line_has_width_and_round_caps, test_scene_draw_background_ball_and_ring, test_draw_order_is_insertion_order. Anti-aliasing checked visually only. |
-| FR-009 | test_preview.py: key tests, test_holds_last_frame_when_finished, test_step_does_not_pass_the_end, test_preview_frames_match_offline_render, test_window_size_and_title; test_cli.py: preview dispatch tests. **Untested:** real-time pacing / slow-down-not-skip (manual) |
+| FR-007 | test_export.py: test_writer_real_encode, test_scene_render, test_require_ffmpeg_missing, test_writer_missing_ffmpeg, test_scene_render_fails_before_simulating, test_writer_ffmpeg_failure_includes_stderr, test_writer_bad_frame_length; test_cli.py: test_render_default_out_path, test_render_default_out_uses_script_seed, test_missing_ffmpeg_exit_code. test_command_uses_crf18_faststart_h264, test_real_encode_is_faststart |
+| FR-008 | test_render.py: test_full_ring_matches_analytic_coverage, test_circle_edge_matches_analytic_coverage, test_gap_arc_ends_at_physics_segment_ends, test_renderer_satisfies_protocol, test_clear_fills_frame_and_size, test_circle_fills_inside_only, test_thick_line_has_width_and_round_caps, test_scene_draw_background_ball_and_ring, test_draw_order_is_insertion_order. |
+| FR-009 | test_preview.py: key tests, test_holds_last_frame_when_finished, test_step_does_not_pass_the_end, test_preview_frames_match_offline_render, test_window_size_and_title; test_cli.py: preview dispatch tests. test_paced_at_scene_fps_and_never_skips_steps |
 | FR-010 | test_cli.py: load single/zero/many, test_load_skips_main_block, override tests, test_scene_run_dispatches_to_cli, test_script_run_as_main_renders, missing-file tests, test_render_end_to_end |
 | FR-011 | test_example.py: test_example_layout, test_example_initial_velocity_follows_seed, test_ball_stays_inside_ring |
 | NFR-001 | test_determinism.py: same-seed identical hashes, different-seed differs; manual two-process byte-identical MP4 |
 | NFR-002 | test_example.py::test_example_renders_expected_format |
-| NFR-003 | test_world.py: test_no_tunnelling_at_max_speed, test_ball_too_thin_for_ring_at_max_speed_warns, test_thin_ball_ok_with_more_substeps |
+| NFR-003 | test_world.py: test_no_tunnelling_at_max_speed, test_ball_too_thin_for_ring_at_max_speed_is_rejected, test_thin_ball_allowed_with_more_substeps |
 | NFR-004 | test_render.py: test_rendering_does_not_mutate_physics, test_draw_alone_leaves_state_unchanged |
 | NFR-005 | test_smoke.py; ruff + mypy gate |
 | NFR-006 | test_example.py::test_readme_has_quickstart_and_api (docstrings by review) |

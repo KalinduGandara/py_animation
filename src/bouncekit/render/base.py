@@ -29,6 +29,23 @@ class Renderer(Protocol):
         """Draw a line ``width`` pixels thick from ``a`` to ``b`` with round caps."""
         ...
 
+    def arc(
+        self,
+        center: Vec,
+        radius: float,
+        width: float,
+        start_degrees: float,
+        end_degrees: float,
+        color: Color,
+    ) -> None:
+        """Draw a band ``width`` thick along a circle of ``radius``, anti-aliased.
+
+        The arc runs clockwise on screen (increasing angle, +y down) from
+        ``start_degrees`` to ``end_degrees`` with round caps; a sweep of 360 degrees
+        or more draws a full ring.
+        """
+        ...
+
     def to_rgb_bytes(self) -> bytes:
         """Return the frame as packed RGB24 bytes (``width * height * 3``)."""
         ...

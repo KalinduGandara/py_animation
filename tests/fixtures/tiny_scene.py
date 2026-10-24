@@ -2,7 +2,8 @@
 
 from bouncekit import Scene
 
-scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=7, gravity=(0.0, 0.0))
+scene = Scene(width=64, height=48, fps=30, duration=0.5, seed=7, gravity=(0.0, 0.0),
+              max_speed=1500)
 vx = scene.rng.uniform(-50.0, 50.0)
 scene.add_circle(center=(32, 24), radius=20, segments=32)
 ball = scene.add_ball(pos=(32, 24), radius=4, velocity=(vx, 10.0), color="#ff0000")

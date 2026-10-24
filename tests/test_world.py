@@ -2,12 +2,11 @@
 
 import math
 import random
-import warnings
 
 import pytest
 
 import bouncekit.scene as scene_mod
-from bouncekit import Ball, CircleBoundary, Scene, TunnellingWarning
+from bouncekit import Ball, CircleBoundary, ConfigError, Scene
 
 
 def _small(**kw: object) -> Scene:
@@ -209,7 +208,7 @@ def test_rotation_angle_after_n_frames() -> None:
 
 def test_rotating_gap_collisions_follow_rotation() -> None:
     # After 1 s at 90 deg/s the gap (initially +x) points down the screen (+y).
-    s = _small(fps=30, gravity=(0, 900), duration=3.0)
+    s = _small(fps=30, gravity=(0, 900), duration=3.0, max_speed=2800)
     r = s.add_circle(center=(100, 100), radius=80, gap_degrees=60, angular_velocity=90)
     for _ in range(30):
         s.step_frame()
@@ -221,7 +220,7 @@ def test_rotating_gap_collisions_follow_rotation() -> None:
 
 
 def test_static_ring_with_gap_right_holds_falling_ball() -> None:
-    s = _small(fps=30, gravity=(0, 900), duration=2.0)
+    s = _small(fps=30, gravity=(0, 900), duration=2.0, max_speed=2800)
     r = s.add_circle(center=(100, 100), radius=80, gap_degrees=60)
     b = s.add_ball(pos=(100, 100), radius=8)
     for _ in range(s.total_frames):
@@ -277,23 +276,21 @@ def test_speed_clamped_after_collisions_with_spinning_ring(angle: float) -> None
 
 
 @pytest.mark.parametrize("ring_first", [True, False])
-def test_ball_too_thin_for_ring_at_max_speed_warns(ring_first: bool) -> None:
+def test_ball_too_thin_for_ring_at_max_speed_is_rejected(ring_first: bool) -> None:
     # Per-step travel at max_speed is 4000/480 = 8.33 px; ball radius 3 plus half
     # of an 8 px ring is only 7 px, so the ball could tunnel (NFR-003).
     s = _small(width=400, height=400)
     if ring_first:
         s.add_circle(center=(200, 200), radius=180, thickness=8)
-        with pytest.warns(TunnellingWarning, match="tunnel"):
+        with pytest.raises(ConfigError, match="tunnel"):
             s.add_ball(pos=(200, 200), radius=3)
     else:
         s.add_ball(pos=(200, 200), radius=3)
-        with pytest.warns(TunnellingWarning, match="tunnel"):
+        with pytest.raises(ConfigError, match="tunnel"):
             s.add_circle(center=(200, 200), radius=180, thickness=8)
 
 
-def test_thin_ball_ok_with_more_substeps() -> None:
+def test_thin_ball_allowed_with_more_substeps() -> None:
     s = _small(width=400, height=400, substeps=16)
     s.add_circle(center=(200, 200), radius=180, thickness=8)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", TunnellingWarning)
-        s.add_ball(pos=(200, 200), radius=3)
+    s.add_ball(pos=(200, 200), radius=3)

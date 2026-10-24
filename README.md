@@ -44,7 +44,8 @@ if __name__ == "__main__":
 - Invalid settings raise `ConfigError`.
 - Ball speed is clamped to `max_speed` after every physics step. If a ball at
   `max_speed` could pass through a ring in one step (`max_speed / (fps * substeps)` >=
-  `ball radius + ring thickness / 2`), a `TunnellingWarning` says how to fix it.
+  `ball radius + ring thickness / 2`), `add_ball`/`add_circle` raise `ConfigError`
+  saying how to fix it (more `substeps`, lower `max_speed`, bigger ball, thicker ring).
 
 ## CLI
 

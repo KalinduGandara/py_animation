@@ -64,6 +64,7 @@ class CircleBoundary:
         self.body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
         self.body.position = position
         self.body.angular_velocity = math.radians(spin)
+        self._segment_count = segments
         self.shapes: list[pymunk.Segment] = self._build_segments(segments, elasticity_value)
         space.add(self.body, *self.shapes)
 
@@ -127,8 +128,20 @@ class CircleBoundary:
         return self._tags
 
     def draw(self, renderer: Renderer) -> None:
-        """Draw each present segment at the current rotation (reads state only)."""
-        for seg in self.shapes:
-            a = self.body.local_to_world(seg.a)
-            b = self.body.local_to_world(seg.b)
-            renderer.thick_line((a.x, a.y), (b.x, b.y), self._thickness, self._color)
+        """Draw the ring as a smooth arc at the current rotation (reads state only).
+
+        The arc spans the present segments' end points, so the drawn gap matches the
+        physics gap (the chord polygon is within a fraction of a pixel of the arc).
+        """
+        if not self.shapes:
+            return
+        rotation = math.degrees(self.body.angle)
+        if len(self.shapes) == self._segment_count:
+            start, end = rotation, rotation + 360.0
+        else:
+            first, last = self.shapes[0].a, self.shapes[-1].b
+            start = rotation + math.degrees(math.atan2(first.y, first.x)) % 360
+            end = rotation + math.degrees(math.atan2(last.y, last.x)) % 360
+            if end <= start:
+                end += 360.0
+        renderer.arc(self.center, self._radius, self._thickness, start, end, self._color)

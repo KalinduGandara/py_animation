@@ -76,7 +76,8 @@ def test_writer_ffmpeg_failure_includes_stderr(tmp_path: Path) -> None:
 
 
 def test_scene_render(tmp_path: Path) -> None:
-    scene = Scene(width=64, height=48, fps=30, duration=0.5, gravity=(0.0, 0.0))
+    scene = Scene(width=64, height=48, fps=30, duration=0.5, gravity=(0.0, 0.0),
+                  max_speed=1500)
     scene.add_circle(center=(32, 24), radius=20, segments=32)
     scene.add_ball(pos=(32, 24), radius=4, velocity=(30, 20), color="#ff0000")
     out = scene.render(tmp_path / "sub" / "o.mp4")
@@ -95,3 +96,34 @@ def test_scene_render_fails_before_simulating(
         scene.render(tmp_path / "o.mp4")
     assert scene.frame == 0
     assert not (tmp_path / "o.mp4").exists()
+
+
+def test_command_uses_crf18_faststart_h264() -> None:
+    cmd = FfmpegWriter(Path("x.mp4"), 64, 48, 30)._command("ffmpeg")
+    joined = " ".join(cmd)
+    for part in ("-c:v libx264", "-crf 18", "-pix_fmt yuv420p", "-movflags +faststart",
+                 "-f rawvideo", "-pix_fmt rgb24", "-s 64x48", "-r 30", "-i -"):
+        assert part in joined, part
+
+
+def _top_level_boxes(path: Path) -> list[str]:
+    data = path.read_bytes()
+    boxes, i = [], 0
+    while i + 8 <= len(data):
+        size = int.from_bytes(data[i:i + 4], "big")
+        boxes.append(data[i + 4:i + 8].decode("latin-1"))
+        if size == 1:
+            size = int.from_bytes(data[i + 8:i + 16], "big")
+        if size < 8:
+            break
+        i += size
+    return boxes
+
+
+def test_real_encode_is_faststart(tmp_path: Path) -> None:
+    out = tmp_path / "fs.mp4"
+    with FfmpegWriter(out, 64, 48, 30) as w:
+        for _ in range(5):
+            w.write(bytes(64 * 48 * 3))
+    boxes = _top_level_boxes(out)
+    assert boxes.index("moov") < boxes.index("mdat")
