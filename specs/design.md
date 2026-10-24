@@ -642,3 +642,241 @@ Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.co
 | `when` | fires once | edge-triggered repeat (not needed by any example; one flag later if wanted) |
 | Event type | one `Event` dataclass with `kind` (`CollisionEvent` alias) | one class per kind (more types for the same fields; `play` reads speed/step uniformly) |
 | Spatial hash | automatic at 100 balls, fixed dim/count | user option (no example needs tuning; constant is documented) |
+
+---
+
+## M3 — Visual polish + MIDI
+
+### M3.1 Overview
+
+```mermaid
+flowchart TB
+    subgraph sim[Scene.step_frame - physics, unchanged pipeline M2.1]
+        step[space.step x substeps] --> disp[RuleEngine.dispatch]
+        disp -->|A.play / ctx.play| trig[_trigger: Note / Scale / Melody chord<br/>+ pan from event x]
+        disp -->|A.particles / ctx.particles| pend[(pending bursts<br/>fx_rng draws)]
+        disp --> queue[(command queue)] --> apply[apply: spawn / split<br/>resolve colour modes, inherit trail+glow]
+    end
+    sim --> fx[Effects.advance - once per frame<br/>advance particles, append pending]
+    fx --> draw
+    subgraph draw[Scene.draw - read only]
+        clear[clear] --> trails[renderer.trails<br/>fade layer, segments, max-composite]
+        trails --> objs[objects, flash colours]
+        objs --> parts[particles: circle alpha]
+        parts --> glow[renderer.glow<br/>quarter-res layer, box blur, add]
+    end
+    trig --> mix[mixer.mix: per-note L/R gains<br/>tanh per channel, common peak]
+    midi[(assets/midi/*.mid)] -->|mido, at S.melody call| melody[Melody chords]
+    wav[(assets/samples/*.wav)] -->|soundfile, at S.sample call| sample[Sample voice<br/>linear-interp resample]
+    melody --> trig
+    sample --> mix
+```
+
+Effects live beside the simulation: the only link from simulation to effects is "dispatch appends a burst" and "draw reads positions/colours". Nothing flows back. Audio keeps the M1 offline pipeline; melodies and samples are just new sources/voices.
+
+### M3.2 Modules (new/changed)
+
+```
+src/bouncekit/
+  colors.py            # + ColorMode: Fixed, HueCycle, BySpeed, ByGeneration;
+                       #   fixed(), hue_cycle(), by_speed(), by_generation(), hsv()   FR-306
+  config.py            # + EffectsConfig; SceneConfig gains `effects`                  FR-303..FR-305
+  render/base.py       # + TrailSegment, GlowDisc, GlowArc; Renderer: circle(alpha=),
+                       #   trails(), glow()                                             FR-302
+  render/pygame_renderer.py  # alpha in _fill_distance; trail layer; glow layer        FR-302
+  render/effects.py    # Particle, Effects (fx state: particles, pending bursts,
+                       #   trail bookkeeping, hue cursors); draw helpers               FR-303..FR-306
+  render/preview.py    # + hot-reload polling, error title                              FR-310
+  actions.py           # + Particles, particles(); Play gains `pan`                     FR-305, FR-309
+  rules/context.py     # + ctx.particles(); ctx.play(pan=); spawn trail/glow/colour mode
+  rules/commands.py    # BallSpec + trail, glow, color_mode; split inheritance
+  world/ball.py        # + trail, glow, color_mode; color property evaluates the mode
+  world/circle.py      # + glow; glow_light()
+  sound.py             # + melody(), Melody, sample(); Source = Note | Scale | Melody
+  audio/midi.py        # read_chords(path, track, transpose) via mido                  FR-307
+  audio/voices.py      # + Sample voice; resolve_voice accepts Sample                   FR-308
+  audio/mixer.py       # NoteTrigger.pan; stereo accumulation; pan_gains()              FR-309
+  scene.py             # fx_rng, Effects owner, draw pipeline, _trigger for Melody +
+                       #   pan, colour-mode resolution at ball creation               all
+  cli.py               # preview passes the watched path                               FR-310
+scripts/make_assets.py # generates assets/midi/ode_to_joy.mid, assets/samples/kalimba.wav FR-311
+examples/midi_melody.py                                                                FR-311
+```
+
+### M3.3 Public API
+
+```python
+from pathlib import Path
+from bouncekit import Scene, EffectsConfig, actions as A, sound as S, colors as C
+
+ASSETS = Path(__file__).parent.parent / "assets"
+scene = Scene(duration=40, seed=3, background="#07070d",
+              effects=EffectsConfig(trail_seconds=0.35, glow_blur=18, max_particles=2000))
+ring = scene.add_circle(center=(540, 960), radius=460, color="#e8e8ff", glow=0.6, tags={"wall"})
+scene.add_ball(pos=(540, 700), radius=22, velocity=(320, 0), color=C.hue_cycle(),
+               trail=True, glow=1.0, tags={"ball"})
+tune = S.melody(ASSETS / "midi/ode_to_joy.mid", voice=S.sample(ASSETS / "samples/kalimba.wav", root="A4"))
+scene.on_collision("ball", "wall", [A.play(tune, pan=0.7), A.particles(count=16), A.flash(ring)])
+```
+
+```python
+# config.py
+@dataclass(frozen=True)
+class EffectsConfig:
+    trail_seconds: float = 0.3     # > 0; trail falls to 5 % after this long
+    glow_blur: float = 18.0        # > 0, px at full resolution
+    max_particles: int = 2000      # >= 0
+    def trail_keep(self, fps: int) -> float:   # 0.05 ** (1 / (trail_seconds * fps))
+# SceneConfig: new field `effects: EffectsConfig = EffectsConfig()`; Scene(..., effects=None) -> default.
+
+# colors.py
+@dataclass(frozen=True, eq=False) class Fixed:        color: Color
+@dataclass(frozen=True, eq=False) class HueCycle:     start: float; step: float; saturation: float; value: float
+@dataclass(frozen=True, eq=False) class BySpeed:      slow: Color; fast: Color; max_speed: float
+@dataclass(frozen=True, eq=False) class ByGeneration: colors: tuple[Color, ...]
+ColorMode = Fixed | HueCycle | BySpeed | ByGeneration
+ColorSpec = ColorLike | ColorMode
+def fixed(color: ColorLike) -> Fixed
+def hue_cycle(*, start=0.0, step=20.0, saturation=0.75, value=1.0) -> HueCycle
+def by_speed(*, slow="#2a6cff", fast="#ff3b6b", max_speed=2000.0) -> BySpeed
+def by_generation(*colors: ColorLike) -> ByGeneration     # () -> DEFAULT_PALETTE (6 colours)
+def hsv(h_degrees: float, s: float, v: float) -> Color
+# Dynamic = BySpeed | ByGeneration (evaluated at draw); Fixed / HueCycle resolve to a Color at creation.
+
+# render/base.py
+@dataclass(frozen=True) class TrailSegment: a: Vec; b: Vec; width: float; color: Color
+@dataclass(frozen=True) class GlowDisc: center: Vec; radius: float; color: Color; intensity: float
+@dataclass(frozen=True) class GlowArc:  center: Vec; radius: float; width: float
+                                        start_degrees: float; end_degrees: float; color: Color; intensity: float
+class Renderer(Protocol):   # additions only
+    def circle(self, center, radius, color, *, alpha: float = 1.0) -> None
+    def trails(self, segments: Sequence[TrailSegment], *, keep: float, reset: bool) -> None
+    def glow(self, lights: Sequence[GlowDisc | GlowArc], *, blur: float) -> None
+
+# Scene / world additions
+Scene(..., effects: EffectsConfig | None = None)
+scene.fx_rng: random.Random                          # Random(f"bouncekit-fx:{seed}")
+add_ball(..., color: ColorSpec = "#ffffff", trail: bool = False, glow: float | bool = 0.0)
+add_circle(..., color: ColorLike | Fixed = "#ffffff", glow: float | bool = 0.0)
+Ball.trail: bool; Ball.glow: float; Ball.color_mode: BySpeed | ByGeneration | None; Ball.hue_mode: HueCycle | None
+CircleBoundary.glow: float
+
+# actions.py
+@dataclass(frozen=True, eq=False) class Play: source: Source; gain: float = 1.0; pan: float = 0.0
+def play(source, *, gain=1.0, pan=0.0) -> Play
+@dataclass(frozen=True, eq=False) class Particles:
+    count: int; speed: float; lifetime: float; size: float; color: ColorSpec | None; drag: float; pos: Vec | None
+def particles(*, count=12, speed=400.0, lifetime=0.5, size=3.0, color=None, drag=2.0, pos=None) -> Particles
+def spawn(..., color: Value[ColorSpec] = "#ffffff", trail=False, glow=0.0) -> Spawn
+def recolor(color: Value[ColorSpec], *, target="a") -> Recolor
+
+# rules/context.py
+def play(self, source, *, gain=1.0, pan=0.0) -> None
+def particles(self, *, pos, count=12, speed=400.0, lifetime=0.5, size=3.0, color=None, drag=2.0) -> None
+def spawn(self, ..., trail=False, glow=0.0) -> None
+
+# sound.py
+@dataclass(frozen=True, eq=False)
+class Melody:
+    chords: tuple[tuple[tuple[float, float], ...], ...]   # ((hz, velocity/127), ...) per chord
+    voice: Voice
+def melody(path: str | os.PathLike[str], *, voice: VoiceLike = "sine",
+           track: int | None = None, transpose: int = 0) -> Melody
+def sample(path: str | os.PathLike[str], *, root: Pitch = "C4", duration: float | None = None) -> Sample
+Source = Note | Scale | Melody
+
+# audio/voices.py
+@dataclass(frozen=True, eq=False)
+class Sample:
+    path: str; root_hz: float; rate: int; data: NDArray[np.float64]   # mono, as read
+    duration: float | None = None
+    def render(self, hz: float, seed: int) -> NDArray[np.float64]
+Voice = Sine | Triangle | Pluck | Marimba | Sample
+
+# audio/mixer.py
+@dataclass(frozen=True) class NoteTrigger: step; offset; voice; hz; gain; pan: float = 0.0
+def pan_gains(pan: float) -> tuple[float, float]   # (1.0, 1.0) for pan == 0
+```
+
+### M3.4 Effects state and draw pipeline (FR-301, FR-303..FR-306)
+
+`render/effects.py` holds one `Effects` object per scene (`scene._fx`):
+
+```python
+@dataclass
+class Particle: x: float; y: float; vx: float; vy: float; age: int; life: int; size: float; color: Color
+class Effects:
+    particles: list[Particle]          # live, creation order
+    pending: list[Particle]            # created this frame
+    trail_pos: dict[int, Vec]          # object index -> position at last trail update (lookup only)
+    trail_frame: int | None            # frame of the last trail update
+    hue_index: dict[HueCycle, int]     # per-mode counter (identity-keyed, lookup only)
+    def burst(self, rng, *, pos, count, speed, lifetime, size, color, drag, fps, capacity) -> None
+    def advance(self, fps: int) -> None
+```
+
+- `burst` draws `uniform(0, 2π)` then `uniform(0.4, 1.0)` from `scene.fx_rng` per kept particle and appends to `pending` (each particle stores its own `drag` factor `exp(−drag/fps)`, precomputed per burst). Capacity = `max_particles − len(particles) − len(pending)`.
+- `Scene.step_frame` calls `self._fx.advance(fps)` at the very end (after `engine.conditions`) only when `particles or pending` is non-empty: advance + cull existing, then `particles.extend(pending)`; `pending.clear()`.
+- `Scene.draw(renderer)`:
+  1. `renderer.clear(background)`.
+  2. If any live ball has `trail`: build segments per FR-303 (`trail_pos` default = current position), decide `keep`/`reset` from `trail_frame` vs `self.frame`, call `renderer.trails(...)`, then update `trail_pos` for live trail balls and `trail_frame = self.frame`. Draw writes this bookkeeping (effect state only; "renderer only reads world state" concerns physics). A scene is drawn by one renderer in practice; the bookkeeping is not keyed per renderer (documented limitation).
+  3. Objects in insertion order with flash colours (M2, unchanged). Ball.draw uses `ball.color` (mode-evaluated).
+  4. Particles: `renderer.circle((x, y), size, color, alpha=1 − age/life)`.
+  5. If any live object has `glow > 0`: lights in insertion order (ball → `GlowDisc`, ring → `ring.glow_light(color)` mirroring its arc), `renderer.glow(lights, blur=effects.glow_blur)`.
+  Steps 2, 4, 5 are skipped entirely when unused, so effect-free scenes make exactly the M2 renderer calls (NFR-304).
+- Colour resolution at ball creation (`add_ball`, `Scene._spawn_ball` for spawn/split): `Fixed` → its colour; `HueCycle` → `hsv(...)` with `hue_index[mode]` then increment; dynamic modes → stored in `ball.color_mode` with base colour = the mode's value at creation. `Ball.color` returns `mode.evaluate(ball)` when `color_mode` is set. `recolor` with a mode resolves the same way (dynamic → sets `color_mode`; fixed/hue → clears it).
+- Split: child 0 (the parent) keeps its colour/mode. Each ball remembers `hue_mode: HueCycle | None` (the mode it was created/recoloured with); a new child gets `parent.color_mode` if dynamic, else the next hue of `parent.hue_mode` if set, else the parent's colour. Spawn: colour value/mode resolved per ball at apply time; a refused command resolves nothing (FR-306).
+
+### M3.5 PygameRenderer additions (FR-302, NFR-303)
+
+- `_fill_distance(..., alpha=1.0, target=None)`: coverage × alpha; `target` defaults to the frame surface (lets trails reuse the SDF code on the trail layer). `circle(..., alpha)` passes it through; `alpha == 1.0` keeps the exact M2 arithmetic (no extra multiply), so existing bytes are unchanged.
+- **Trails**: `self._trail: Surface` (lazy, frame-sized, black). `reset` → fill black. `keep < 1` → `fill((k, k, k), BLEND_RGB_MULT)` with `k = round(keep × 255)`, then `fill((1, 1, 1), BLEND_RGB_SUB)`: measured in planning, MULT alone rounds up and gets stuck at 6/255 (visible ghosting), the extra −1 guarantees decay to 0 (FR-302 bound). Segments via `thick_line` SDF onto the layer (`target=self._trail`), then `surface.blit(self._trail, (0, 0), special_flags=BLEND_RGB_MAX)`. Cost measured: fade ≈ 0.6 ms, composite ≈ 1.8 ms, 100 segments ≈ 5.5 ms.
+- **Glow**: quarter-resolution layer (`ceil(W/4) × ceil(H/4)`), cleared each call; `GlowDisc` → `pygame.draw.circle` at `/4` coordinates with colour × intensity (clamped); `GlowArc` → `pygame.draw.arc` (or a polyline of the arc) of `max(1, width/4)` px; then `pygame.transform.box_blur(layer, max(1, round(blur / 4)))` twice (≈ gaussian), `smoothscale` up to full size, `blit(..., BLEND_RGB_ADD)`. Measured: box_blur at 270×480 ≈ 1 ms each; up-scale + add ≈ 3.5 ms. `gaussian_blur` was measured at 15 ms (quarter) / 63 ms (half) / 133 ms (half, r = 8) and rejected.
+- Budget for NFR-303 (measured pieces): base 100 balls + ring ≈ 25 ms (ring arc 12.6 ms, circles 55 µs each, bytes 2 ms) + trails ≈ 8 ms + glow ≈ 7 ms + 300 particles × ≈ 34 µs ≈ 10 ms → ≈ 50 ms.
+
+### M3.6 MIDI melody (FR-307)
+
+- `audio/midi.py: read_chords(path, *, track, transpose) -> tuple[tuple[tuple[int, int], ...], ...]` (MIDI number, velocity) using `mido.MidiFile(path)`; with `track=None`, iterate every track computing absolute ticks per track (sum of `msg.time`), collect `(tick, note, velocity)` for `note_on` with velocity > 0 and `channel != 9`; sort by `(tick, note)`; group equal ticks; dedupe pitch keeping max velocity. `mido` exceptions, `OSError`, `EOFError`, `ValueError` → `ConfigError(f"melody: cannot read {path}: …")`.
+- `sound.melody` converts to `(pitch_to_hz(note + transpose), velocity / 127)`, range-checked by `pitch_to_hz`.
+- `Scene._trigger`: the policy checks are unchanged (they gate the *hit*); for a `Melody` the scene cursor picks chord `i`, appends one `NoteTrigger` per note (same step/offset, `gain = hit_gain × vel`), then updates `_last_trigger` and `_frame_triggers` once. Cursor dict shared with `Scale` (`self._cursor`, identity-keyed).
+- `mido` is added with `uv add mido`; mypy override `ignore_missing_imports` for `mido` if it lacks `py.typed`.
+
+### M3.7 Sample voice and pan (FR-308, FR-309)
+
+- `S.sample` reads with `soundfile.read(path, dtype="float64", always_2d=True)`, averages channels, validates, stores `data` (read-only array), `rate`, `root_hz`. Identity hashing (`eq=False`) keeps it usable as the mixer cache key `(voice, hz, seed)`.
+- `render`: `ratio = hz / root_hz × rate / 48000`; `n = floor((len − 1) / ratio) + 1` (min with duration cap); `y = np.interp(np.arange(n) × ratio, np.arange(len), data)`; 48-sample linear attack from 0, 240-sample linear release to 0; peak-normalise. Linear interpolation aliases when shifting far up; acceptable for short percussive samples (out-of-scope note).
+- `Scene._trigger` computes `trigger.pan = play.pan × (2·clamp(x/width, 0, 1) − 1)` when `ev.position` is not `None` and `play.pan > 0`, else `0.0`.
+- `mix()`: stealing pass unchanged. Accumulation: if every trigger has `pan == 0` → the M1 mono path verbatim (exact bytes). Otherwise two float64 accumulators; each note adds `seg × gL` and `seg × gR` (`pan_gains`); `tanh` per channel; `peak = max(|L|, |R|)`; both scaled by the same factor; end fade on both. `limit_true_peak` already handles stereo.
+
+### M3.8 Preview hot-reload (FR-310)
+
+- `Preview(make_scene, scale, *, watch: Path | None = None, reload: Callable[[], Scene] | None = None)`. `watch` is the scene file; `reload` (defaults to `make_scene`) reloads it. `cli preview` passes `watch=path`, `reload=lambda: load_scene(path, seed, duration)`; `Scene.preview` passes `watch=Path(sys.argv[0])` and its existing restart factory.
+- `poll_reload(now: float | None = None)`: called from `run()` each iteration; returns early when `now − last_check < 0.5` (time from `time.monotonic()`, preview only). Compares `(st_mtime_ns, st_size)`; on change calls `_load()`.
+- `_load()`: `try: scene = reload()` / `except Exception as exc:` → `self.error = f"{type(exc).__name__}: {exc}"`, print `error: …` to stderr once per file version, keep `self.scene`; else replace scene, clear error, `paused = False`, set `reloaded_until = now + 2`. R uses `_load()` too (so a broken file no longer crashes R). `_title()` appends ` - load error: <first 80 chars>` or ` - reloaded`.
+- A `PygameRenderer` is reused across reloads; the new scene's `Effects.trail_frame is None` forces `reset=True` on its first draw, so no stale trail shows. A reloaded scene with a different canvas size gets a new renderer and window size.
+
+### M3.9 Determinism strategy (NFR-301, NFR-302)
+
+- Two RNG streams with disjoint roles: `scene.rng` (physics/rules, unchanged) and `scene.fx_rng` (effects only). Particle draws happen during dispatch, whose order is fixed (M2.6); truncation at capacity is deterministic.
+- Hue counters are per mode per scene and advance in ball-creation order (deterministic command order); colour modes never touch either RNG.
+- Effect state updates are keyed to `scene.frame`, not to draw calls (particles advance in `step_frame`; trails compare `trail_frame` with `frame`), so preview pauses/redraws cannot change later frames.
+- Renderer layers use integer SDL blits/blur and the same numpy SDF code as M0; same machine + library versions → same bytes.
+- Melody parsing is pure (sorted by tick, note); sample resampling is numpy `interp` on fixed inputs.
+- Tests: (a) effects scene built twice → equal frame hashes, audio bytes, event keys; seed change differs. (b) same scene with effects on vs off → equal per-frame `(position, velocity)` for every ball, equal event keys, equal `scene.rng.getstate()`.
+
+### M3.10 Key decisions and alternatives
+
+| Decision | Chosen | Alternatives (rejected because) |
+|---|---|---|
+| Trails | persistent fading layer (SRS), max-composited, per-frame segment from previous to current position | per-ball position history drawn as tapered alpha polyline (≈ 10 segments × 100 balls × 55 µs ≈ 55 ms/frame, 7× the layer cost; long bounding boxes); full-frame fading overlay (also smears rings and background) |
+| Trail decay | MULT + SUB 1 per frame | MULT only (measured: never reaches 0, ghost at 6/255); numpy floor-multiply on the full frame (≈ 6 ms more) |
+| Glow | one quarter-res layer, 2× `box_blur`, additive | `gaussian_blur` (15–133 ms measured); analytic per-object radial falloff in numpy (cost grows with ball count and glow size) |
+| Renderer extension | 3 batch primitives (`circle(alpha)`, `trails`, `glow`) | generic layer API (`push_layer`/`pop_layer`, blend modes): more surface for a future skia backend with no second use case |
+| Particle RNG | separate `fx_rng` seeded from the scene seed | `scene.rng` (would change physics outcomes of any rule using rng when particles are added); numpy Generator (no benefit) |
+| Particle timing | created at dispatch, advanced once per frame after the frame | per-step particle sub-simulation (more cost, invisible difference) |
+| Particles as an action | `A.particles(...)` rule handler (cooldown-gated) | per-ball `particles=True` option (needs a hidden built-in collision rule; less control over which pair emits) |
+| Colour modes | `ColorMode` values resolved at creation (fixed/hue) or draw (speed/generation) | callables only (`color=lambda ctx: ...`): no draw-time modes, no hue counter |
+| Melody grouping | equal start tick = chord; ignore tempo/durations | time window grouping (needs a tolerance); tempo-driven playback (contradicts "each hit plays the next note") |
+| Sample pitch shift | linear-interpolation resampling | sinc/polyphase (scipy not in the stack; more code); time-stretching (not needed) |
+| Pan | on `A.play(pan=)`, equal-power with `√2` makeup so centre == M1 | on sources (sources are pitch generators; the play has the event position); unnormalised `cos/sin` (centred notes 3 dB quieter than M1) |
+| Hot reload | poll `(mtime_ns, size)` every 0.5 s | `watchdog` (new dependency); polling every frame (needless `stat` calls) |

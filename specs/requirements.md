@@ -263,3 +263,87 @@ Terms: a **rule** is one registration (`on_collision`, `on_escape`, `on_spawn`, 
 
 ### Out of scope for M2
 Trails, glow, particles, colour modes such as `C.hue_cycle()` / by speed / by generation (M3); MIDI melodies, sample voices, stereo pan, hot-reload (M3); batch, metadata JSON with event counts, text overlay, progress bar (M4); spawning rings or other shapes, segments, polygons, joints, camera (M5); `when` rules that re-fire on every rising edge; rule removal/enable-disable at runtime; per-rule priorities; audio in the preview.
+
+---
+
+## M3 — Visual polish + MIDI
+
+Scope: **Milestone M3 only**: trails, glow, impact particles, colour modes, MIDI melody source, sample voices with pitch shifting, stereo pan by x, preview hot-reload, and a polished MIDI example. Flashes already exist (`A.flash`, FR-210) and are unchanged except that a glowing object glows in its flash colour. SRS references: [P1]..[P5] core principles, [API] "Public API", [Arch] "Architecture" (`render/` bullet), [Audio] "Audio", [Stack] "Tech stack", [M3] milestone M3, [Eng] "Engineering standards". Assumptions: `clarifications.md` § "M3 assumptions" (D1..D27).
+
+Terms: an **effect** is anything drawn that is not a world object's own shape (trail, glow, particle). **Effect state** is data kept only for drawing (trail layer, particle list, colour-mode cursors); **physics state** is every pymunk body/shape value, `scene.events`, `scene.rng`'s state and the command queue. `rate = fps × substeps`.
+
+### FR-301 Visual-only effects and the fx RNG — [P3], [P1], [Arch]
+- THE SYSTEM SHALL keep all effect state outside pymunk and outside `scene.rng`; no effect SHALL add, remove or modify a body or shape, consume `scene.rng`, or add/alter an entry of `scene.events`.
+- THE SYSTEM SHALL provide `scene.fx_rng`, a `random.Random` seeded with the string `f"bouncekit-fx:{seed}"` (seed after CLI overrides), used only by effects (particles). Scripts MAY use it for their own visual randomness.
+- WHEN a scene uses no effect (no ball/ring with `trail` or `glow`, no `A.particles`/`ctx.particles` call, no dynamic colour mode), THE SYSTEM SHALL produce exactly the same frame bytes as M2 (NFR-304).
+
+### FR-302 Renderer protocol extension — [Stack], [Arch]
+- The `Renderer` protocol SHALL gain exactly: an `alpha: float = 1.0` keyword on `circle` (coverage × alpha blended over the frame; `alpha` in [0, 1]); `trails(segments, *, keep, reset)`; and `glow(lights, *, blur)`. No other method is added; the existing methods keep their signatures and behaviour for `alpha=1.0`.
+- `trails(segments: Sequence[TrailSegment], *, keep: float, reset: bool)`: WHEN `reset` is true THE SYSTEM SHALL clear the backend's persistent trail layer to black; otherwise it SHALL scale every layer channel by `keep` (in [0, 1]; `keep = 1.0` leaves the layer unchanged) such that, for `keep < 1`, any value reaches exactly 0 after at most `ceil(log(1/255) / log(keep)) + 255` calls with no new segments (no residual ghosting); then draw each `TrailSegment(a, b, width, color)` (round caps, anti-aliased) onto the layer, then composite the layer onto the frame with a per-channel maximum (`max(frame, layer)`).
+- `glow(lights: Sequence[GlowDisc | GlowArc], *, blur: float)`: THE SYSTEM SHALL draw each light (colour × `intensity`, clamped to 255) onto a cleared glow layer, blur it by approximately `blur` px (at the full-resolution scale), and add it to the frame with saturating per-channel addition. `GlowDisc(center, radius, color, intensity)` is a filled disc; `GlowArc(center, radius, width, start_degrees, end_degrees, color, intensity)` follows `Renderer.arc` geometry.
+- `PygameRenderer` SHALL implement all three deterministically (same calls → same bytes on the same machine and library versions).
+
+### FR-303 Trails — [Arch], [M3]
+- `scene.add_ball(..., trail=False)`, `A.spawn(..., trail=False)` and `ctx.spawn(..., trail=False)` SHALL accept a bool (else `ConfigError` naming `trail`); split children SHALL inherit it.
+- `Scene(effects=EffectsConfig(...))` SHALL configure trails: `trail_seconds: float = 0.3` (positive finite), from which the per-frame decay is `keep = 0.05 ** (1 / (trail_seconds × fps))`.
+- WHILE at least one live ball has `trail=True`, `Scene.draw` SHALL call `renderer.trails(...)` once per call, after `clear` and before any object is drawn, with one segment per live trail ball, in insertion order, from the ball's position at the previous trail update to its current position, `width = 2 × radius`, colour = the ball's current base colour (FR-306, without flash).
+- Trail updates SHALL be keyed on `scene.frame`: WHEN `draw` is called for frame `f` and the last trail update was for frame `f − 1` of the same scene, THE SYSTEM SHALL pass `keep` and the new segments; WHEN it was for frame `f` (redraw, e.g. paused preview), it SHALL pass `keep=1.0` and no segments; otherwise (first draw, or frames skipped) it SHALL pass `reset=True`, and a ball with no previous position contributes a zero-length segment (a dot).
+- Destroyed balls SHALL contribute no new segments; their existing trail keeps fading on the layer.
+
+### FR-304 Glow — [Arch], [M3]
+- `scene.add_ball(..., glow=0.0)`, `scene.add_circle(..., glow=0.0)`, `A.spawn(..., glow=0.0)` and `ctx.spawn(..., glow=0.0)` SHALL accept a number in [0, 4] or a bool (`True` = 1.0, `False` = 0.0), else `ConfigError` naming `glow`; split children SHALL inherit it.
+- `EffectsConfig.glow_blur: float = 18.0` (px, positive finite) SHALL set the blur.
+- WHILE at least one live object has `glow > 0`, `Scene.draw` SHALL call `renderer.glow(...)` once per call, after all objects and particles are drawn, with one light per glowing object in insertion order: a ball → `GlowDisc(position, radius, colour, glow)`; a ring → one `GlowArc` matching the arc it draws. The colour SHALL be the colour the object is drawn in this frame (including flash, FR-210).
+
+### FR-305 Impact particles — [Arch], [API], [M3]
+- THE SYSTEM SHALL provide `A.particles(*, count=12, speed=400.0, lifetime=0.5, size=3.0, color=None, drag=2.0, pos=None)` and `ctx.particles(*, pos, count=12, speed=400.0, lifetime=0.5, size=3.0, color=None, drag=2.0)`. `count` int in 1..500; `speed`, `size`, `lifetime` positive finite; `drag` finite ≥ 0 (1/s); `color` `None`, a colour value or a colour mode; `pos` `None` or a 2-vector. Invalid values SHALL raise `ConfigError` naming the argument at construction/call.
+- `A.particles` is a non-play handler: it is gated by rule cooldowns (FR-204) like every built-in action except `A.play`. WHEN registered with `pos=None` on a timer or condition rule (events without position), THE SYSTEM SHALL raise `ConfigError` at registration naming `pos` and the rule kind.
+- WHEN the handler runs, THE SYSTEM SHALL create a burst at `pos` (or the event's `position`) with colour `color` (or, for `None`, subject `a`'s current base colour, white without `a`). For particle `i` in order it SHALL draw from `scene.fx_rng`: angle `φ = uniform(0, 2π)`, then speed `speed × uniform(0.4, 1.0)`. The burst SHALL be truncated to the remaining capacity `EffectsConfig.max_particles` (default 2000, int ≥ 0) and draw rng values only for the particles kept.
+- After each frame's steps and `when` rules, THE SYSTEM SHALL advance existing particles by one frame (`v *= exp(−drag / fps)`, then `p += v / fps`, `age += 1`), remove those with `age ≥ L` where `L = max(1, round(lifetime × fps))`, then append the particles created during that frame with `age = 0` at their spawn position. Particle advancement SHALL NOT depend on whether or how often `draw` is called.
+- `Scene.draw` SHALL draw each live particle, after all objects and before glow, as `circle(pos, size, color, alpha=1 − age / L)` in creation order.
+
+### FR-306 Colour modes — [API], [Arch], [M3]
+- `bouncekit.colors` SHALL provide `fixed(color)`, `hue_cycle(*, start=0.0, step=20.0, saturation=0.75, value=1.0)`, `by_speed(*, slow="#2a6cff", fast="#ff3b6b", max_speed=2000.0)` and `by_generation(*colors)` (no arguments → a built-in 6-colour palette), each returning a frozen, identity-hashed `ColorMode`. Bad arguments SHALL raise `ConfigError` naming them (`start`/`step` finite degrees, `saturation`/`value` in [0, 1], `max_speed` positive finite, colours valid).
+- `add_ball(color=...)`, `A.spawn(color=...)` (value or `f(ctx)`), `ctx.spawn(color=...)` and `A.recolor`/`ctx.recolor` SHALL accept a colour value or a `ColorMode`; `add_circle(color=...)` SHALL accept a colour value or `fixed(...)` only, else `ConfigError` naming `color`.
+- `fixed(c)` SHALL behave exactly like `c`. For `hue_cycle`, the `k`-th ball (0-based, per mode instance per scene, counting `add_ball`, spawned balls and new split children in creation order, and recolors with that mode) SHALL get the fixed colour `hsv((start + k·step) mod 360, saturation, value)` (`colorsys.hsv_to_rgb`, channels `round(255·x)`); a refused split/spawn SHALL NOT advance the counter; a split parent keeps its colour.
+- `by_speed` SHALL give `round(slow + (fast − slow) · min(1, |v| / max_speed))` per channel from the ball's velocity at draw time; `by_generation` SHALL give `colors[generation mod len(colors)]`. Split children and spawned balls SHALL inherit dynamic modes.
+- `Ball.color` SHALL return the current base colour (mode evaluated now); `Ball.color_mode` SHALL return the dynamic mode or `None`. Colour modes SHALL never read or advance `scene.rng`.
+
+### FR-307 MIDI melody source — [Audio], [API], [Stack]
+- THE SYSTEM SHALL provide `S.melody(path, *, voice="sine", track=None, transpose=0)`, which reads a Standard MIDI File with `mido` when called and returns a frozen, identity-hashed `Melody` with `chords: tuple[tuple[tuple[float, float], ...], ...]` (per chord: `(hz, velocity / 127)` pairs) and `voice`.
+- Notes SHALL be the `note_on` messages with velocity > 0 of track `track` (`None` = all tracks), excluding MIDI channel 10 (index 9, percussion), transposed by `transpose` semitones. Notes with the same absolute start tick SHALL form one chord, ordered by ascending MIDI number; a pitch repeated within a chord is kept once with its highest velocity. Chords SHALL be ordered by start tick.
+- WHEN the file is missing or unreadable, contains no usable notes, `track` is out of range, `transpose` is not an int, or a transposed note leaves 20 Hz..20 kHz, THE SYSTEM SHALL raise `ConfigError` naming the path or argument.
+- `A.play(melody)` / `ctx.play(melody)`: each trigger allowed by the trigger policy (FR-106, FR-211) SHALL play the next chord: one `NoteTrigger` per note, all at the same `step`/`offset`, with gain `trigger_gain × velocity/127`; it SHALL count as one trigger for `max_triggers_per_frame` and the retrigger interval. After the last chord the cursor SHALL wrap to the first. The cursor is per `Melody` instance per scene, advanced only by chords that play (like `Scale`, FR-103).
+- MIDI tempo, note durations and non-note messages SHALL be ignored (the hits set the rhythm).
+
+### FR-308 Sample voice — [Audio], [API]
+- THE SYSTEM SHALL provide `S.sample(path, *, root="C4", duration=None)` returning a `Sample` voice (identity-hashed) usable as `voice=` in `note`, `scale` and `melody`. The file SHALL be read with `soundfile` when called, mixed to mono by averaging channels; `root` is a `Pitch`; `duration` is `None` or a positive finite number of seconds.
+- `Sample.render(hz, seed)` SHALL resample by linear interpolation with step `ratio = (hz / root_hz) × (file_rate / 48000)`: output length `n = floor((len − 1) / ratio) + 1`, truncated to `round(duration × 48000)` when given; output sample `i` = linear interpolation of the source at index `i × ratio`. It SHALL apply a 1 ms linear attack from 0, a 5 ms linear release to 0 at the end, and normalise the peak to 1.0; `seed` is ignored.
+- WHEN the file is missing/unreadable, has fewer than 2 frames, or is silent, or `root`/`duration` is invalid, THE SYSTEM SHALL raise `ConfigError` naming the path or argument.
+- A sample rendered at `hz = 2 × root_hz` SHALL have a dominant frequency twice the source's (within 1 %) and length `≈ len / 2`.
+
+### FR-309 Stereo pan by x-position — [Audio]
+- `A.play(source, *, gain=1.0, pan=0.0)` and `ctx.play(source, *, gain=1.0, pan=0.0)` SHALL accept `pan` in [0, 1] (else `ConfigError` naming `pan`). `NoteTrigger` SHALL gain a field `pan: float = 0.0` in [−1, 1].
+- For a trigger from an event with a `position`, `trigger.pan = pan × (2 · clamp(x / width, 0, 1) − 1)`; for events without a position it SHALL be 0.
+- The mixer SHALL apply equal-power gains `L = √2 · cos θ`, `R = √2 · sin θ` with `θ = (trigger.pan + 1) · π / 4`, except that `trigger.pan == 0` SHALL use exactly `L = R = 1.0`; so `L² + R² = 2` for every pan, a hard-left note (`pan = −1`) is silent in the right channel, and a centred note is identical to M1.
+- The master bus SHALL apply `tanh` per channel and one common peak normalisation over both channels (the stereo image is kept), then the end fade. WHEN every trigger has `pan == 0`, `mix()` SHALL return exactly the M1 bytes.
+
+### FR-310 Preview hot-reload — [M3], [Eng]
+- WHEN the preview runs a scene loaded from a file (`bouncekit preview file.py`, `python file.py`, `scene.preview()` in a script), THE SYSTEM SHALL check that file's `(st_mtime_ns, st_size)` at most every 0.5 s of wall-clock time (preview pacing only; never in simulation), using no new dependency.
+- WHEN the pair changed, THE SYSTEM SHALL reload the scene via `cli.load_scene(path, seed=…, duration=…)` with the current seed/duration overrides, replace the shown scene, restart at frame 0 (unpaused), print `reloaded <path>` to stderr and show "reloaded" in the window title for 2 s.
+- WHEN reloading (or R-restarting) raises any exception (including `SyntaxError` and `ConfigError` from the script), THE SYSTEM SHALL keep the last good scene running, print `error: <ExceptionType>: <message>` to stderr once per changed file version, and show `load error` plus the first 80 characters of the message in the window title until the next successful load. The preview SHALL NOT exit.
+- Only the scene file itself is watched (not modules it imports).
+
+### FR-311 Assets and example — [M3], [API]
+- `scripts/make_assets.py` SHALL generate, deterministically (byte-identical on every run), `assets/midi/ode_to_joy.mid` (Beethoven's "Ode to Joy" theme, public domain, ≥ 30 melody notes with a bass note forming a 2-note chord at the start of each bar) with `mido`, and `assets/samples/kalimba.wav` (synthesised, mono, 48 kHz, 16-bit PCM, ≤ 1 s, root A4) with numpy + soundfile. Both outputs SHALL be committed; no file is downloaded.
+- `examples/midi_melody.py` SHALL: use a ring with `glow`, balls with `color=C.hue_cycle()`, `trail=True`, `glow > 0`; a collision rule with `A.play(S.melody(<ode_to_joy.mid resolved relative to the example file>, voice=...), pan=...)` and `A.particles(...)`; and render with `bouncekit render` to an MP4 with an AAC track in which the first N triggers' pitches equal the first N notes of the melody's chords in order.
+
+### Non-functional (M3)
+- **NFR-301 Determinism with effects** [P1]: Two builds of a scene using trails, glow, particles, hue-cycle and by-speed colours, a melody and pan SHALL produce identical frame SHA-256 hashes, `audio_buffer()` bytes and event logs (automated); a different seed SHALL differ.
+- **NFR-302 Effects never change physics** [P3]: The same scene built with and without every effect (trails, glow, particles actions, dynamic colour modes, pan) SHALL have identical per-frame ball positions/velocities, `scene.events` keys and `scene.rng` state after N frames (automated).
+- **NFR-303 Render cost** [Eng]: Drawing one 1080×1920 frame (`Scene.draw` + `to_rgb_bytes`) of a scene with one glowing ring, 100 balls with trail + glow and ~300 live particles SHALL take ≤ 60 ms median on the development machine (Apple Silicon; M2 baseline for 100 plain balls ≈ 25 ms). The measured median (ms/frame) SHALL be reported in `progress.md`; the automated test only asserts a loose bound (< 250 ms) to stay non-flaky.
+- **NFR-304 Compatibility**: All M0–M2 tests SHALL pass unmodified; M0–M2 example frame bytes and audio bytes are unchanged (scenes without effects and without pan/melody/sample go through identical code paths).
+- **NFR-305 Tooling, deps, docs** [Eng], [Stack]: pytest, ruff, mypy pass; full suite < 120 s; the only new runtime dependency is `mido` (SRS stack); README quickstart + API overview cover M3; public API has docstrings.
+
+### Out of scope for M3
+skia backend; per-ball trail length or tapered/history trails; bloom thresholds, motion blur, screen shake, camera (M5); text/title overlay, batch rendering, metadata JSON, progress bar (M4); audio in the preview window; MIDI tempo/duration-driven playback, sustain pedal, pitch bend, program changes, multiple simultaneous melodies sharing one cursor; high-quality (sinc) resampling, sample loop points, multi-sample instruments; pan by y or by velocity; reverb/effects on audio; watching imported modules or asset files for hot-reload; colour modes on rings other than `fixed`; particle collisions with the world.
