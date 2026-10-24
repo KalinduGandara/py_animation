@@ -347,3 +347,114 @@ Terms: an **effect** is anything drawn that is not a world object's own shape (t
 
 ### Out of scope for M3
 skia backend; per-ball trail length or tapered/history trails; bloom thresholds, motion blur, screen shake, camera (M5); text/title overlay, batch rendering, metadata JSON, progress bar (M4); audio in the preview window; MIDI tempo/duration-driven playback, sustain pedal, pitch bend, program changes, multiple simultaneous melodies sharing one cursor; high-quality (sinc) resampling, sample loop points, multi-sample instruments; pan by y or by velocity; reverb/effects on audio; watching imported modules or asset files for hot-reload; colour modes on rings other than `fixed`; particle collisions with the world.
+
+## M4 — Batch + productivity
+
+Scope: **Milestone M4 only**: overridable scene parameters, `--set` overrides, the `bouncekit batch` command over seeds × parameter grids, a metadata JSON file beside each MP4 the CLI writes, an optional title/text overlay, a progress bar with ETA, and an example. SRS references: [P1]..[P5] core principles, [API] "Public API", [Arch] "Architecture" (`cli.py` bullet), [Stack] "Tech stack", [M4] milestone M4, [Eng] "Engineering standards". Assumptions: `clarifications.md` § "M4 assumptions" (E1..E24).
+
+Terms: a **param** is a named value a script declares with `scene.param(...)`. An **override** is a `name=value` text from the CLI (`--set`, or one `--grid` value). A **job** is one render of the script with one seed and one set of overrides. **CLI render** means `bouncekit render` or one batch job (both write metadata); `Scene.render(...)` called from Python is not a CLI render.
+
+### FR-401 Scene parameters — [M4], [API]
+- THE SYSTEM SHALL provide `Scene.param(name: str, default: bool | int | float | str) -> bool | int | float | str`, which returns the override for `name` parsed to the type of `default` when one is active, else `default`.
+- `name` SHALL match `[A-Za-z_][A-Za-z0-9_]*`, else `ConfigError` naming `name`. `default` SHALL be a `bool`, `int`, finite `float` or `str`, else `ConfigError` naming the param.
+- Override text SHALL be parsed by the type of `default`: `bool` accepts `true/false/1/0/yes/no/on/off` (case-insensitive); `int` accepts what `int(text)` accepts (so `"40.5"` fails); `float` accepts finite `float(text)` values; `str` is the text unchanged. WHEN parsing fails, THE SYSTEM SHALL raise `ConfigError` naming the param, its type and the text.
+- WHEN `param` is called again with the same name, THE SYSTEM SHALL return the same value if `default` is equal and of the same type, else raise `ConfigError` naming the param.
+- `Scene.params` SHALL return a new `dict` of every declared param and its effective value, in first-declaration order.
+- `param` SHALL NOT read or advance `scene.rng` or `scene.fx_rng`. With no override active it returns `default`, so a scene built without the CLI behaves as before.
+
+### FR-402 Overrides from the CLI — [M4], [API], [P1]
+- `bouncekit render`, `bouncekit preview` and `bouncekit batch` SHALL accept `--set NAME=VALUE`, repeatable. `NAME` must be a valid param name. `VALUE` is any text and may be empty. Each name may appear at most once across all `--set` and `--grid` options. WHEN a `--set` is malformed or a name repeats, THE SYSTEM SHALL print `error: …` naming the option and exit with code 2 before running any script.
+- `cli.load_scene(path, seed=None, duration=None, params=None)` SHALL accept `params: Mapping[str, str] | None`. These overrides SHALL be active while the script runs, like `seed`/`duration`, so values derived from params (and from `scene.rng`) follow them.
+- WHEN the script finishes and an override name was never declared with `scene.param`, `load_scene` SHALL raise `ConfigError` listing the unknown names and the declared ones. The CLI prints `error: …` and exits 2 for `render`/`preview`; in `batch` the job fails (FR-404).
+- Preview reloads, both hot-reload and R, SHALL reuse the same `--set` overrides.
+- Output naming: `bouncekit render` without `--out` SHALL write `out/<stem>_seed<seed><suffix>.mp4`. `<suffix>` is empty when there are no overrides, so the M0 name is unchanged. Otherwise it is `_<name>-<value>` for each override in command-line order, with every character of `value` outside `[A-Za-z0-9.+-]` replaced by `_` and an empty value written as `_`.
+
+### FR-403 Batch planning — [M4], [Arch]
+- THE SYSTEM SHALL provide `bouncekit batch SCENE [--seeds SPEC] [--set K=V ...] [--grid K=V1,V2,... ...] [--duration S] [--jobs N] [--out-dir DIR] [--quiet]`.
+- `--seeds SPEC` SHALL accept comma-separated items, each a non-negative integer `N` or an inclusive range `A-B` with `A ≤ B`. Duplicates are dropped, keeping the first occurrence; order is as written (`"3,1-2,2"` → `[3, 1, 2]`). WHEN `--seeds` is omitted, THE SYSTEM SHALL run one seed: the script's own seed.
+- `--grid K=V1,V2,...` SHALL split the values on `,` (each may be empty, and at least one is required). Jobs SHALL be the Cartesian product, with seeds outermost and grid params in command-line order with their values in the order written (the last `--grid` varies fastest). Every job SHALL carry all `--set` overrides plus one value per grid param.
+- Each job's output SHALL be `<out-dir>/<stem>_seed<seed><suffix>.mp4` (FR-402 suffix over the `--set` then `--grid` overrides in command-line order) and `<same stem>.json`. `--out-dir` defaults to `out`; it is created if missing. Existing files are overwritten.
+- WHEN two planned jobs would write the same file name, or the seed spec, grid, `--jobs` (an integer ≥ 1) or `--duration` is invalid, THE SYSTEM SHALL print `error: …` naming the option and exit 2 before rendering anything. ffmpeg availability SHALL be checked once before the first job, exiting 2 when it is missing.
+
+### FR-404 Batch execution and failure isolation — [M4]
+- With `--jobs 1` (the default), THE SYSTEM SHALL run jobs one after another in the CLI process, in planned order. With `--jobs N > 1` it SHALL run up to `N` jobs at once in separate worker processes (spawn start method). Each job SHALL load the script afresh with its own seed, duration and overrides (FR-402) and do a CLI render (FR-405).
+- WHEN a job raises any `Exception` (script error, `ConfigError`, `FfmpegError`, unknown param, …) or its worker process dies, THE SYSTEM SHALL record the job as failed with `<ExceptionType>: <message>`, delete that job's MP4 and JSON if they exist, and continue with the remaining jobs.
+- As each job finishes, THE SYSTEM SHALL print `[<i>/<n>] wrote <mp4> (<frames> frames, <seconds> s)` to stdout for a success (omitted with `--quiet`) or `[<i>/<n>] FAILED <mp4>: <error>` to stderr for a failure (always shown). `<i>` is the job's 1-based planned index. After all jobs it SHALL print `batch: <ok> ok, <failed> failed` (always shown).
+- The exit code SHALL be 0 when every job succeeded and 1 when any job failed (2 is reserved for FR-403 errors).
+- Output files and their metadata SHALL be the same, except `render_seconds`, for any `--jobs` value and any completion order (NFR-401).
+
+### FR-405 Render metadata JSON — [M4]
+- WHEN a CLI render succeeds, THE SYSTEM SHALL write `<mp4 stem>.json` next to the MP4: UTF-8, `json.dumps(…, indent=2)` plus a trailing newline, with exactly these keys in this order:
+  - `"scene"`: the script path as given on the CLI.
+  - `"video"`: the MP4 file name.
+  - `"seed"`: int.
+  - `"params"`: `Scene.params`, with JSON bool/int/float/str values.
+  - `"duration"`: `config.duration` in seconds.
+  - `"frames"`: frames rendered.
+  - `"fps"`: int.
+  - `"size"`: `[width, height]`.
+  - `"events"`: an object with the keys `collision`, `escape`, `spawn`, `destroy`, `timer`, `condition` in that order, holding the count of `scene.events` of each kind (0 when none).
+  - `"sound_triggers"`: `len(scene.triggers)`, the number of notes started; a chord counts each note.
+  - `"versions"`: `{"bouncekit", "pymunk", "pygame"}` version strings.
+  - `"render_seconds"`: the wall-clock time of the render, rounded to 3 decimals.
+- The JSON SHALL be written only after the MP4 is complete, so a failed render leaves no JSON. `Scene.render(...)` called from Python SHALL NOT write metadata, and its output directory contents are unchanged from M3.
+- Every value except `render_seconds` SHALL be identical for two renders of the same script, seed, duration and overrides.
+
+### FR-406 Text overlay — [M4], [API]
+- THE SYSTEM SHALL provide `scene.add_text(text, *, pos, size=64.0, color="#ffffff", start=0.0, end=None) -> Text`. Here `text` is a `str` (`"\n"` separates lines) or a callable `f(scene) -> str` evaluated at each draw; `pos` is the screen-pixel centre of the text block; `size` is the font size in px (positive finite, ≤ 1000); `color` is a colour value; `start` (finite, ≥ 0) and `end` (`None` or finite) are in seconds.
+- Invalid arguments SHALL raise `ConfigError` naming the argument at the call. This includes `end` such that `round(end × fps) ≤ round(start × fps)`. A callable returning a non-`str` SHALL raise `ConfigError` naming `text` when drawn.
+- The text SHALL be visible exactly at frames `f` with `round(start × fps) ≤ f < round(end × fps)` (no upper bound when `end` is `None`).
+- `Scene.draw` SHALL draw visible texts after everything else (after glow), in `add_text` order. Each line is a `renderer.text(...)` call. Lines are stacked `round(1.2 × size)` px apart (centre to centre), and the block is centred on `pos`. Line `k` of `n` is centred at `y = pos.y + (k − (n − 1)/2) × round(1.2 × size)`.
+- A text is a visual overlay, not a world object. It SHALL NOT appear in `objects`/`count`, take part in physics, events, rules or `scene.rng`, or be affected by trails, glow or flashes. A scene with no text SHALL make exactly the M3 renderer calls (NFR-402).
+- `Text` (frozen) SHALL expose `text`, `pos`, `size`, `color`, `start_frame` and `end_frame` (`None` when open-ended).
+
+### FR-407 Renderer text primitive — [Stack], [Arch]
+- The `Renderer` protocol SHALL gain exactly one method, `text(self, text: str, center: Vec, size: float, color: Color) -> None`. It draws one line, anti-aliased and alpha-blended over the frame, with the line's advance box centred horizontally on `center.x` and its line box (ascender to descender, the font's sized height) centred vertically on `center.y`. Text that is empty or only whitespace draws nothing.
+- `PygameRenderer.text` SHALL use `pygame.freetype` with the bundled default font (`Font(None, size)`; `freesansbold.ttf` in pygame-ce), initialised lazily, with fonts cached per size. It SHALL be deterministic: the same calls give the same bytes on the same machine and library versions. No font file is added to the repository.
+
+### FR-408 Progress bar with ETA — [M4], [P1]
+- `bouncekit render` SHALL show progress over frames, and `bouncekit batch` over jobs, as one line on stderr, rewritten in place with `\r`, in the form `<label> [<bar of 20 '#'/'-'>] <pct>% <done>/<total> <unit> ETA <m:ss>`. Before any progress has been measured, ETA is `--:--`.
+- The bar SHALL be shown only when stderr is a TTY and `--quiet` is not given. `--quiet` is accepted by `render` and `batch`. When the bar is disabled, nothing is written for it, so there are no `\r` characters on stderr. When it is shown, it is redrawn at most every 0.1 s of wall-clock time plus once at completion, and finished with a newline.
+- `Scene.render(out, *, progress=None)` SHALL accept `progress: Callable[[int, int], None] | None`, called with `(frames_written, total_frames)` after each frame is written to ffmpeg. The simulation SHALL NOT read the clock. Wall-clock time SHALL be read only by the progress bar, by the batch summary and for `render_seconds`.
+- ETA = `elapsed / done × (total − done)` using `time.monotonic()`, injectable for tests.
+- WHILE the batch bar is shown, per-job lines (FR-404) SHALL clear the bar line first and redraw it after, so lines never interleave with the bar.
+
+### FR-409 Example — [M4], [Eng]
+- `examples/param_sweep.py` SHALL declare at least two params with `scene.param` (one numeric that changes the physics, for example ring gap or ball speed, and one that changes the look), add a title with `add_text` that disappears before the end, and add a live counter with a callable `add_text`. It SHALL have sound and render with `bouncekit render`.
+- `bouncekit batch examples/param_sweep.py --seeds 1-2 --grid <numeric param>=<two values> --duration <short>` SHALL produce 4 MP4 + 4 JSON files with distinct names and exit 0.
+
+### Non-functional (M4)
+- **NFR-401 Determinism** [P1]: Params, overrides, text overlays, the progress bar and batch parallelism SHALL NOT change the simulation. The following SHALL be automated:
+  - A scene loaded with `params={"k": "v"}` equals one whose script hard-codes that value: identical frame hashes, events and rng state.
+  - Rendering with and without a `progress` callback gives identical frame bytes.
+  - A text overlay changes no ball state, event or rng state.
+  - `batch --jobs 2` and `--jobs 1` give the same file names and metadata, except `render_seconds`.
+- **NFR-402 Compatibility**: All M0–M3 tests SHALL pass unmodified. In particular, `Scene.render` writes only the MP4, `render` without `--set` keeps the M0 default name, and frame bytes of scenes without text are unchanged.
+- **NFR-403 Tooling, deps, docs** [Eng], [Stack]:
+  - pytest, ruff and mypy pass, and the full suite runs in < 120 s.
+  - No new runtime dependency (stdlib `json`, `concurrent.futures`, `multiprocessing`; `pygame.freetype` is part of pygame-ce).
+  - The README quickstart and API overview cover M4, and the public API has docstrings.
+
+### Out of scope for M4
+- Fonts other than the pygame default (font files, bold/italic, `font=` option).
+- Text alignment other than centred.
+- Text outline, shadow, fade in/out or glow.
+- Text as a physics object.
+- Rich-text or per-character colour.
+- Params other than bool/int/float/str (lists, colours, vectors).
+- Overrides from a config file (YAML/TOML/JSON).
+- Range syntax for grid values (`0:10:2`).
+- Random parameter search.
+- Grid values containing commas.
+- Negative seeds in `--seeds`.
+- Skipping or resuming existing outputs.
+- Retries.
+- Batch over several scene files.
+- Distributed or remote rendering.
+- GPU encoding.
+- Per-frame progress inside parallel batch jobs.
+- Progress in the preview window.
+- Metadata for `Scene.render` called from Python.
+- A metadata schema version or the full event log in the JSON.
+- Thumbnails or cover images.
+- Rube Goldberg primitives, camera and segments (M5).

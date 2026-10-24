@@ -134,3 +134,97 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
   - Requirements: FR-311, NFR-301, NFR-303, NFR-305
   - Files: examples/midi_melody.py (new), README.md, CLAUDE.md, tests/test_example.py (new tests only), specs/progress.md
   - Done when: tests pass for: the example loads via `cli.load_scene` with a ring with `glow > 0`, balls with `trail`, `glow > 0` and a `HueCycle` colour, and a rule containing a `Play` of a `Melody` with `pan > 0` and a `Particles` action; a short (≈ 3 s, reduced-size override) render has h264 + aac 48000 Hz stereo with non-identical L/R channels; the first N trigger frequencies equal the first N notes of the melody's chords in order; README test checks the M3 section mentions `trail`, `glow`, `A.particles`, `C.hue_cycle`, `S.melody`, `S.sample`, `pan`, `EffectsConfig` and hot-reload; `uv run bouncekit render examples/midi_melody.py` succeeds at full size; all earlier examples still render; full suite < 120 s.
+
+## M4 — Batch + productivity
+
+Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv run ruff check . && uv run mypy`) → tick here → log in `progress.md` → commit `feat(<area>): T-40X <desc> [FR-…]`. Existing M0–M3 tests must pass unmodified (NFR-402).
+
+- [ ] T-401: Vertical slice, params → `--set` → render → metadata JSON.
+  - Scope:
+    - `params.py`: `check_name`, `parse_value`, `suffix`.
+    - `Scene.param` / `Scene.params` and `scene._param_overrides`.
+    - `cli.load_scene(params=)` with the unknown-param check.
+    - `--set` on `render` and `preview`, with preview reload keeping the overrides and the render default name with suffix.
+    - `export/metadata.py` (`build_metadata`, `write_metadata`).
+    - `batch.run_job`, used by `bouncekit render` to render and write the JSON, deleting partial outputs on failure.
+  - Requirements: FR-401, FR-402, FR-405, NFR-401 (params part), NFR-402
+  - Files: src/bouncekit/params.py (new), scene.py, cli.py, batch.py (new; `Job`, `JobResult`, `run_job` only), export/metadata.py (new); tests/fixtures/param_scene.py (new), tests/test_params.py (new), tests/test_metadata.py (new)
+  - Done when these tests pass:
+    - Type parsing: bool words, int rejects `"40.5"`, float rejects `"nan"`, str is verbatim. `param` with a bad name or default type, and a re-declaration with a different default, raise `ConfigError` naming the param. `params` keeps declaration order. `param` leaves `rng`/`fx_rng` state untouched.
+    - `load_scene(fixture, params={"vx": "250"})` matches the hard-coded 250.0 scene (frame hashes, events, rng state).
+    - An unknown override raises `ConfigError` listing the declared names.
+    - `cli.main(["render", fixture, "--set", "vx=250", ...])` writes `out/param_scene_seed<N>_vx-250.mp4` and `.json`.
+    - The JSON has exactly the FR-405 keys in order, with correct seed/params/frames/fps/size and event counts equal to `Counter` of `scene.events`. `sound_triggers` equals `len(triggers)`, the versions match the installed packages, and `render_seconds` is a float ≥ 0.
+    - Two renders give equal JSON except `render_seconds`.
+    - A malformed `--set` (`vx`, `=3`, `1x=3`) or a repeated name exits 2.
+    - A failing render (monkeypatched `mux`) leaves neither MP4 nor JSON.
+    - `render` without `--set` keeps `tiny_scene_seed9.mp4`.
+    - Preview reload receives the same params.
+
+- [ ] T-402: Batch command.
+  - Scope:
+    - `parse_seeds`, `parse_assignments`, `parse_grid` and `plan_jobs` (product order, naming, duplicate-name check, seed resolved after load when `--seeds` is omitted).
+    - `run_batch` (in-process for `--jobs 1`; spawn `ProcessPoolExecutor` for `--jobs N`; worker crash → failed result).
+    - The `batch` subcommand: `--seeds/--set/--grid/--duration/--jobs/--out-dir/--quiet`, the ffmpeg pre-check, per-job lines, the summary, and exit codes 0/1/2.
+  - Requirements: FR-403, FR-404, FR-402, NFR-401 (batch part)
+  - Files: src/bouncekit/batch.py, cli.py; tests/fixtures/flaky_scene.py (new; raises for one param value), tests/test_batch.py (new)
+  - Done when these tests pass:
+    - `parse_seeds("3,1-2,2") == [3, 1, 2]`. `"5-3"`, `"-1"`, `"a"` and `""` raise. `--grid gap=,x` gives values `["", "x"]`, and `gap=` alone gives `[""]`.
+    - `plan_jobs` with seeds `[1, 2]`, `--set theme=a` and grids `gap=10,20` and `speed=1,2` gives 8 jobs in seed-major order, the last grid varying fastest, with names like `param_scene_seed1_theme-a_gap-10_speed-1.mp4`.
+    - Colliding sanitised names and a key repeated across `--set`/`--grid` exit 2 before rendering.
+    - A batch over `flaky_scene.py` with one failing grid value renders the others (MP4 + JSON present), deletes or never creates the failed job's files, prints `FAILED` with the exception type to stderr and `batch: 3 ok, 1 failed`, and exits 1. An all-ok batch exits 0.
+    - `--jobs 2` produces the same file names and metadata (except `render_seconds`) as `--jobs 1`.
+    - With `--seeds` omitted, the name uses the script seed.
+    - `--quiet` drops the `wrote` lines but keeps the summary.
+    - Missing ffmpeg (monkeypatched) exits 2.
+
+- [ ] T-403: Progress bar.
+  - Scope:
+    - `progress.Progress`: TTY check, `enabled` override, 0.1 s throttle with an injected clock, ETA formatting, padding, `write()` clearing and redrawing, `close()` newline.
+    - `Scene.render(progress=)` callback.
+    - `--quiet` on `render`.
+    - Wiring into `render` (frames) and `batch` (jobs).
+  - Requirements: FR-408, NFR-401 (progress part)
+  - Files: src/bouncekit/progress.py (new), scene.py, batch.py, cli.py; tests/test_progress.py (new)
+  - Done when these tests pass:
+    - With a fake clock and a `StringIO` (`enabled=True`), `update` produces `50%`, `5/10 frames` and an ETA `0:05` after 5 s for 5 of 10. Updates within 0.1 s are not drawn, but completion always is. `--:--` shows at 0. Lines are `\r`-prefixed and padded over a longer previous line. `close` writes one newline.
+    - `enabled=None` with a non-TTY stream writes nothing.
+    - `write()` clears and then redraws.
+    - `Scene.render(progress=cb)` calls `cb` with `(1..total, total)` in order, and the frame bytes equal those of a render without a callback.
+    - `cli.main(["render", …])` under capsys (not a TTY) has no `\r` on stderr. With a forced TTY stream (monkeypatched `isatty`) it shows the bar, and `--quiet` suppresses it.
+    - The batch bar shows `jobs`.
+
+- [ ] T-404: Text overlay.
+  - Scope:
+    - `Renderer.text` protocol method.
+    - `PygameRenderer.text`: freetype default font, per-size cache, advance/line-box centring, empty text no-op.
+    - `text.py` (`Text`, validation, `visible`).
+    - `Scene.add_text` / `Scene.texts`.
+    - Draw step after glow, with multi-line layout and callable text.
+  - Requirements: FR-406, FR-407, NFR-401 (text part), NFR-402
+  - Files: src/bouncekit/render/base.py, render/pygame_renderer.py, text.py (new), scene.py, __init__.py (export `Text`); tests/test_text.py (new)
+  - Done when these tests pass:
+    - On a 400×200 black frame, `renderer.text("Hi", (200, 100), 48, white)` produces non-black pixels whose bounding box is centred on (200, 100) within 3 px, with no non-black pixel outside a 200×80 box around it. The same call twice gives identical bytes. `""` and `"  "` leave the frame unchanged.
+    - A scene with `add_text("A", start=0.5, end=1.0)` at 30 fps shows text pixels only at frames 15..29. Frames outside that range equal those of the same scene without text.
+    - Two lines are placed `round(1.2 × size)` px apart.
+    - A callable `lambda s: f"{s.frame}"` changes the pixels between frames. A callable returning `3` raises `ConfigError` naming `text`.
+    - Text draws over a glowing ball: text pixels are pure text colour where fully covered.
+    - Bad `pos`/`size`/`color`/`start`/`end` (including `end ≤ start` in frames) raise `ConfigError` naming the argument.
+    - Text is not in `objects`/`count`.
+    - A scene with vs without text has identical ball states, events and rng state per frame.
+    - A spy renderer shows no `text` calls for text-free scenes.
+
+- [ ] T-405: Example, README, docs.
+  - Scope:
+    - `examples/param_sweep.py`: params `gap` (float, ring gap degrees) and `speed`/`hue_step`, title text with `end`, callable ball counter, sound, escape + spawn rules.
+    - README quickstart and M4 API overview: `scene.param`, `--set`, `batch` with `--seeds/--grid/--jobs/--out-dir/--quiet`, naming, metadata JSON fields, `add_text`, progress bar.
+    - CLAUDE.md commands.
+    - Render the example at full size and run a small batch, then record timings and traceability rows in progress.md.
+  - Requirements: FR-409, NFR-403
+  - Files: examples/param_sweep.py (new), README.md, CLAUDE.md, tests/test_example.py (new tests only), specs/progress.md
+  - Done when these tests pass:
+    - The example loads via `cli.load_scene` and declares ≥ 2 params, one of which changes the ring gap (`load_scene(params={"gap": …})` changes the ring's gap). It has a text with an `end` and a callable text, and a sound rule.
+    - `cli.main(["batch", example, "--seeds", "1-2", "--grid", "gap=30,60", "--duration", "0.5", "--out-dir", tmp])` exits 0 with 4 MP4 + 4 JSON files whose `params.gap` values match the names.
+    - The README test checks that the M4 section mentions `scene.param`, `--set`, `bouncekit batch`, `--seeds`, `--grid`, `--jobs`, `metadata`/`.json`, `add_text` and `--quiet`.
+    - `uv run bouncekit render examples/param_sweep.py` succeeds at full size, and all earlier examples still render.
+    - The full suite runs in < 120 s.

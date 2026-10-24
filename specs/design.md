@@ -902,3 +902,213 @@ class Effects:
 | Sample pitch shift | linear-interpolation resampling | sinc/polyphase (scipy not in the stack; more code); time-stretching (not needed) |
 | Pan | on `A.play(pan=)`, equal-power with `√2` makeup so centre == M1 | on sources (sources are pitch generators; the play has the event position); unnormalised `cos/sin` (centred notes 3 dB quieter than M1) |
 | Hot reload | poll `(mtime_ns, size)` every 0.5 s | `watchdog` (new dependency); polling every frame (needless `stat` calls) |
+
+## M4 — Batch + productivity
+
+### M4.1 Overview
+
+```mermaid
+flowchart TB
+    cli[cli.main: render / preview / batch<br/>parse --set, --grid, --seeds] -->|render| one[run_job in process]
+    cli -->|batch: plan_jobs| plan[(jobs: seed x grid product<br/>names checked unique)]
+    plan -->|--jobs 1| seq[run_job sequentially]
+    plan -->|--jobs N| pool[ProcessPoolExecutor spawn<br/>run_job per worker]
+    one & seq & pool --> load[load_scene path, seed, duration, params<br/>_overrides + _param_overrides active while script runs]
+    load --> scene[Scene: scene.param reads overrides<br/>add_text registers overlays]
+    scene --> render[Scene.render out, progress=cb<br/>draw: ... glow, then texts]
+    render --> meta[export/metadata.py<br/>build + write JSON beside MP4]
+    render -.frames written.-> bar[progress.Progress<br/>stderr TTY only, wall clock]
+    pool -.JobResult.-> summary[per-job lines, batch bar, summary, exit code]
+```
+
+Wall-clock time is read only on the CLI side of `Scene.render`: by the progress bar, the batch lines and `render_seconds`. The simulation and drawing never read it.
+
+### M4.2 Modules (new/changed)
+
+```
+src/bouncekit/
+  scene.py             # + _param_overrides; Scene.param(), Scene.params; add_text(); texts drawn
+                       #   last in draw(); render(out, *, progress=None)            FR-401, FR-406, FR-408
+  params.py      (new) # check_name(), parse_value(name, default, text), suffix()   FR-401, FR-402
+  text.py        (new) # Text dataclass, text validation, visible(frame)           FR-406
+  render/base.py       # Renderer.text(...)                                        FR-407
+  render/pygame_renderer.py  # text via pygame.freetype default font, per-size cache  FR-407
+  render/preview.py    # unchanged (reload closure already carries the CLI options)
+  export/metadata.py (new) # build_metadata(), write_metadata()                    FR-405
+  progress.py    (new) # Progress (stderr bar, ETA, throttle, TTY check)           FR-408
+  batch.py       (new) # parse_seeds, parse_assignments, parse_grid, Job, plan_jobs,
+                       #   JobResult, run_job, run_batch                           FR-403, FR-404
+  cli.py               # load_scene(params=); --set on all; --quiet; batch subcommand;
+                       #   render goes through run_job (metadata + progress)        FR-402..FR-408
+examples/param_sweep.py (new)                                                       FR-409
+```
+
+### M4.3 Public API
+
+```python
+from bouncekit import Scene, actions as A, sound as S, colors as C
+
+scene = Scene(duration=30, seed=1, background="#08080f")
+gap = scene.param("gap", 40.0)            # degrees; `--set gap=60` -> 60.0
+speed = scene.param("speed", 350)         # int
+theme = scene.param("theme", "neon")      # str
+ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=gap, angular_velocity=40, tags={"wall"})
+scene.add_text("Can it escape?", pos=(540, 260), size=72, end=3.0)
+scene.add_text(lambda s: f"balls: {s.count('ball')}", pos=(540, 1700), size=48, color="#9fa8ff")
+```
+
+```python
+# scene.py
+_param_overrides: dict[str, str] = {}        # set by cli.load_scene while the script runs
+class Scene:
+    def param(self, name: str, default: ParamValue) -> ParamValue: ...
+    @property
+    def params(self) -> dict[str, ParamValue]: ...
+    def add_text(self, text: str | Callable[["Scene"], str], *, pos: Vec, size: float = 64.0,
+                 color: ColorLike = "#ffffff", start: float = 0.0, end: float | None = None) -> Text: ...
+    @property
+    def texts(self) -> tuple[Text, ...]: ...
+    def render(self, out: str | Path, *, progress: Callable[[int, int], None] | None = None) -> Path: ...
+
+# params.py
+ParamValue = bool | int | float | str
+def check_name(name: object) -> str                              # ConfigError naming `name`
+def parse_value(name: str, default: ParamValue, text: str) -> ParamValue
+def suffix(overrides: Sequence[tuple[str, str]]) -> str          # "" or "_gap-60_theme-neon"
+
+# text.py
+@dataclass(frozen=True, eq=False)
+class Text:
+    text: str | Callable[[Scene], str]; pos: Vec; size: float; color: Color
+    start_frame: int; end_frame: int | None
+    def visible(self, frame: int) -> bool
+
+# render/base.py (addition only)
+class Renderer(Protocol):
+    def text(self, text: str, center: Vec, size: float, color: Color) -> None: ...
+
+# export/metadata.py
+EVENT_KINDS = ("collision", "escape", "spawn", "destroy", "timer", "condition")
+def build_metadata(scene: Scene, *, script: str, video: Path, render_seconds: float) -> dict[str, object]
+def write_metadata(video: Path, data: Mapping[str, object]) -> Path   # video.with_suffix(".json")
+
+# progress.py
+class Progress:
+    def __init__(self, total: int, *, label: str, unit: str, stream: TextIO | None = None,
+                 enabled: bool | None = None, clock: Callable[[], float] = time.monotonic) -> None
+    def update(self, done: int) -> None      # throttled to 0.1 s, always draws done == total
+    def write(self, line: str, *, stream: TextIO) -> None   # clear bar, print line, redraw
+    def close(self) -> None                  # newline if anything was drawn
+
+# batch.py
+def parse_seeds(spec: str) -> list[int]
+def parse_assignments(items: Sequence[str], option: str) -> list[tuple[str, str]]   # --set
+def parse_grid(items: Sequence[str]) -> list[tuple[str, list[str]]]                  # --grid
+@dataclass(frozen=True)
+class Job:
+    index: int; script: Path; seed: int | None; duration: float | None
+    overrides: tuple[tuple[str, str], ...]; out_dir: Path; out: Path | None   # None: name after load
+@dataclass(frozen=True)
+class JobResult:
+    index: int; out: Path | None; ok: bool; frames: int; seconds: float; error: str | None
+def plan_jobs(script, *, seeds, sets, grid, duration, out_dir) -> list[Job]
+def run_job(job: Job, *, progress: Callable[[int, int], None] | None = None) -> JobResult
+def run_batch(jobs: Sequence[Job], *, workers: int,
+              on_result: Callable[[JobResult], None]) -> list[JobResult]   # sorted by index
+
+# cli.py
+def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None = None) -> Scene
+```
+
+### M4.4 Params and overrides (FR-401, FR-402)
+
+- `load_scene` fills `scene._param_overrides` from `params` next to `_overrides` and clears both in `finally`. `Scene.__init__` copies the overrides into `self._param_values_src`, so later `param` calls in the script see them even if a second scene is built. It also creates `self._params: dict[str, tuple[ParamValue, ParamValue]]` (name → `(default, value)`).
+- `param(name, default)`: `check_name`, then check the default's type. `bool` is tested before `int`, since `bool` is an `int` subclass. A float must be finite. If the name is already declared, compare `type(default)` and value and return the stored value. Otherwise `value = parse_value(name, default, text)` when an override exists, else `default`, then store it.
+- Unknown overrides: after `runpy.run_path`, `load_scene` compares the override keys with `scene.params`. Any leftovers raise `ConfigError("unknown param(s) 'gpa'; the script declares: gap, speed")`. No declarations gives "declares no params".
+- Naming: `suffix(overrides)` gives `"".join(f"_{k}-{_safe(v)}")`, where `_safe` maps characters outside `[A-Za-z0-9.+-]` to `_` and an empty value to `_`. `render` without `--out` uses `out/{stem}_seed{seed}{suffix}.mp4`, with the seed known after load.
+- The CLI parses `--set` with `parse_assignments` before loading. Preview's `reload` closure passes the same `params`.
+
+### M4.5 Batch (FR-403, FR-404)
+
+- `plan_jobs`: `seeds or [None]`. Then `for seed in seeds: for combo in itertools.product(*[values for _, values in grid])`, with overrides = sets + `zip(grid names, combo)`. `out = out_dir / f"{stem}_seed{seed}{suffix}.mp4"` when the seed is known. With `--seeds` omitted the seed comes from the script, so the name is resolved in `run_job` after load; all jobs then share that seed and the grid suffix keeps names distinct. Duplicate names raise `ConfigError` and give exit 2. Duplicates are only possible through `_safe` collisions such as `a b` versus `a_b`.
+- `run_job(job, progress)`:
+  1. `t0 = time.monotonic()`.
+  2. `scene = load_scene(...)`, then resolve `out`.
+  3. `scene.render(out, progress=progress)`.
+  4. `write_metadata(out, build_metadata(scene, script=str(job.script), video=out, render_seconds=round(time.monotonic() - t0, 3)))`.
+  5. Return `JobResult(ok=True, frames=scene.frame, …)`.
+
+  On `Exception`, remove `out` and `out.with_suffix(".json")` if they exist (`missing_ok`) and return `ok=False, error=f"{type(exc).__name__}: {exc}"`. `KeyboardInterrupt` propagates. `bouncekit render` is `run_job` with a frame progress bar. Its failure prints `error: …` and exits 2, as in M0.
+- `run_batch`:
+  - `workers == 1`: a loop in the current process, calling `on_result` after each job.
+  - `workers > 1`: `ProcessPoolExecutor(max_workers=min(workers, len(jobs)), mp_context=multiprocessing.get_context("spawn"))`. Submit all jobs and handle `as_completed`. A future that raises (`BrokenProcessPool` or a pickling error) becomes `JobResult(ok=False, error="worker crashed: …")`. `Job` and `JobResult` hold only picklable data, and `run_job` is a module-level function.
+- The CLI `batch` command:
+  1. Parse and plan, exiting 2 on errors.
+  2. Call `require_ffmpeg()`, exiting 2 if it is missing.
+  3. Create `Progress(len(jobs), label="batch", unit="jobs")`.
+  4. In `on_result`, print the job line through `progress.write` and update the bar with the done count.
+  5. At the end, close the bar, print the summary and return `1 if failed else 0`.
+
+### M4.6 Metadata (FR-405)
+
+`build_metadata` reads only finished scene state:
+
+- `scene.config` for the seed, duration, fps and size.
+- `scene.frame` for frames.
+- `Counter(ev.kind for ev in scene.events)` mapped over `EVENT_KINDS`.
+- `len(scene.triggers)`.
+- `scene.params`.
+- Versions from `bouncekit.__version__`, `pymunk.version` and `pygame.version.ver`.
+
+`write_metadata` writes `json.dumps(data, indent=2) + "\n"` to a temp file in the same directory and `os.replace`s it, so a crash never leaves half a JSON. Dict insertion order fixes the key order.
+
+### M4.7 Text overlay (FR-406, FR-407)
+
+- `add_text` validates and builds a `Text` with `start_frame = round(start * fps)` and `end_frame = None | round(end * fps)`. It appends the `Text` to `scene._texts` (insertion order) and returns it.
+- `Scene.draw`, after the glow step: `for t in self._texts: if t.visible(self.frame):`
+  1. `s = t.text(self) if callable(t.text) else t.text`.
+  2. If `s` is not a `str`, raise `ConfigError("text callable must return str; got …")`.
+  3. Set `lines = s.split("\n")` and `n = len(lines)`.
+  4. Draw each line `k` with `renderer.text(line, (x, y + (k - (n - 1) / 2) * lh), size, color)`, where `lh = round(1.2 * size)`.
+
+  Line layout lives in the Scene with a fixed line height, so the `Renderer` protocol grows by one method only (E15).
+- `PygameRenderer.text(text, center, size, color)`:
+  - If `text.strip() == ""`, return. freetype raises on empty renders.
+  - `font = self._fonts.get(size)`, else `pygame.freetype.init()` (idempotent) and `Font(None, size)`. Set `antialiased = True` and `origin = True`. Cache the font.
+  - `surf, rect = font.render(text, fgcolor=color)` gives a SRCALPHA surface. With `origin = True`, `rect.x` is the left bearing and `rect.y` the distance from the baseline to the top of the ink.
+  - Advance box: `adv = sum(m[4] for m in font.get_metrics(text) if m)`, the horizontal advances. `get_rect` is the ink box (measured: `Rect(3, 35, 87, 45)` for "Hgy" at 48 px). Line box height: `font.get_sized_height(size)` (52 at 48 px). Ascender: `font.get_sized_ascender(size)` (39).
+  - Horizontal: `left = cx - adv / 2`. Vertical: `top = cy - height / 2` and `baseline = top + ascender`.
+  - Blit `surf` at `(round(left + rect.x), round(baseline - rect.y))`. This centres the advance box and the line box (not the ink box), so lines with and without descenders share a baseline layout.
+  - SDL alpha-blending is deterministic. The exact metric calls are confirmed by introspection in T-404.
+- Preview draws texts the same way, through `Scene.draw`.
+
+### M4.8 Progress (FR-408)
+
+- `Progress.enabled = stream.isatty()` when `enabled` is `None`. The CLI passes `enabled=False` for `--quiet`.
+- `update(done)` stores `done`. It returns unless `done == total` or `clock() - last_draw ≥ 0.1`.
+- The line is `f"\r{label[:24]} [{'#' * k}{'-' * (20 - k)}] {pct:3d}% {done}/{total} {unit} ETA {eta}"`, padded with spaces to the previous line's length so leftovers are erased.
+- `eta = elapsed / done * (total - done)` formatted `m:ss` (`h:mm:ss` from 1 h), or `--:--` while `done == 0`.
+- `write(line, stream=)`: if drawn, write `\r` + spaces + `\r`, then the line, then redraw.
+- `Scene.render` calls `progress(i + 1, total_frames)` after each `writer.write(frame)`. It counts frames written and never reads the clock.
+
+### M4.9 Determinism strategy (NFR-401)
+
+- Overrides are plain data, applied before the script runs, and are read by `param` with no rng access. The same overrides give the same script values, which gives the same simulation. Test: a fixture script `velocity = scene.param("vx", 100.0)` loaded with `params={"vx": "250"}` versus the same scene built with 250.0 gives equal frame hashes, events and `rng.getstate()`.
+- Every batch job is an independent `load_scene` (fresh module namespace, fresh `Scene`, no shared state). Workers use `spawn`, so there is no forked module state. Output depends only on `(script, seed, duration, overrides)`.
+- Text drawing happens after all simulation and effects; it reads `scene` only via the user callable. Wall clock is never passed into `Scene`.
+- Metadata is deterministic except `render_seconds`. Versions are constant per environment.
+
+### M4.10 Key decisions and alternatives
+
+| Decision | Chosen | Alternatives (rejected because) |
+|---|---|---|
+| Param declaration | `scene.param(name, default)`, typed by the default, overrides parsed at the call | module-level `PARAMS = {...}` dict (needs a convention and a second lookup); argparse inside scripts (each script re-implements the CLI); typed `Param` objects (more API for no gain) |
+| Unknown `--set` names | `ConfigError` after the script ran | silently ignored (typos render the wrong video without notice) |
+| Override transport | module-level `_param_overrides`, like the M0 `_overrides` | environment variables (stringly, leak across jobs); passing into `Scene(...)` (scripts would have to forward it) |
+| Parallelism | `ProcessPoolExecutor` with `spawn`, `--jobs 1` in process by default | threads (GIL-bound pymunk/numpy drawing, and the global `_overrides` is not thread-safe); `fork` (unsafe with SDL/ffmpeg pipes on macOS) |
+| File naming | `<stem>_seed<N>_<k>-<v>…` from the CLI text, collisions rejected | hash of the params (unreadable); parsed values (`40` vs `40.0` surprises) |
+| Metadata writer | CLI side (`run_job`), not `Scene.render` | inside `Scene.render` (breaks M1/M2 tests that assert the output directory holds only the MP4; NFR-402) |
+| Text rendering | `pygame.freetype` default font via one `Renderer.text` primitive | `pygame.font` (older API, no float sizes); bundling a TTF (asset and licence work for no M4 need); text as a world object (would enter physics/registry) |
+| Line layout | done in `Scene`, fixed line height `round(1.2 × size)` px | renderer-provided metrics (extends the protocol for one number) |
+| Progress | own 40-line `Progress` class on stderr | `tqdm`/`rich` (new runtime dependency) |
+| Batch progress unit | jobs (plus per-job lines) | frames across all jobs (totals unknown until each script is loaded; needs cross-process queues) |

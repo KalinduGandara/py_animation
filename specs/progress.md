@@ -44,6 +44,7 @@
 - 2026-10-24: T-305 done: Preview(watch=, reload=), poll_reload (0.5 s throttle, (mtime_ns, size)), _load keeps last good scene with stderr-once + title error, R via _load, window rebuilt on canvas change; cli/Scene.preview pass the watched path; existing cli/preview test fakes gained **_kw for the new kwargs; gate passes.
 - 2026-10-24: T-306 done: `examples/midi_melody.py` (glowing ring, hue-cycle trail+glow balls, `A.play(S.melody(ode_to_joy.mid, voice=S.sample(kalimba.wav)), pan=0.8)` + `A.particles` + `A.flash` + capped `A.split`), README M3 section, CLAUDE.md already covered; tests in tests/test_example.py; full-size 30 s render OK (h264 1080x1920@60, aac 48 kHz stereo, 52.7 s wall = 29 ms/frame incl. encode); benchmark scene median 35.6 ms/frame (100 trail+glow balls + ring), 45.8 ms/frame with 300 particles (NFR-303); suite ~41 s; gate passes.
 - 2026-10-24: M3 review fixes (regression tests first) [FR-302, FR-303, FR-310, NFR-303]: (1) trail fade too fast: root cause was the 8-bit trail layer (`BLEND_RGB_MULT` by `round(keep*255)` then `BLEND_RGB_SUB` 1 every frame), so 5 s trails hit 5 % after ~2 s and anything above ~25 s faded in a flat 255 frames; `PygameRenderer.trails` now keeps a float32 layer (fade `v*keep - 1/4096`, clamped at 0, truncated to 8 bits only for the max-composite, touched only inside the dirty box), so a pixel follows `255*keep^n` and reaches 5 % after `trail_seconds` (test_effects.py::test_trail_fades_to_five_percent_after_trail_seconds for 0.3/1/2/5/30 s); FR-302 decay-to-0 bound still holds; NFR-303 full scene ≈ 47-49 ms/frame (unchanged); design §M3.5 updated. (2) hot-reload message: `poll_reload` printed `reloaded` to stdout; it now prints `reloaded <path>` to stderr as FR-310 says (test_preview.py::test_reload_replaces_scene_and_prints_reloaded asserted the wrong stream and no path; tightened to the spec). Gate passes (795 tests, ~41 s; ruff + mypy clean).
+- 2026-10-24: M4 specs written: requirements FR-401..FR-409, NFR-401..NFR-403; design § M4; tasks T-401..T-405; assumptions E1..E24.
 
 ## Traceability (requirement -> tests)
 
@@ -109,4 +110,4 @@
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done; next M4.
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 specified (T-401..T-405); next T-401.

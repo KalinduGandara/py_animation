@@ -16,6 +16,8 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Rules examples (M2): `uv run bouncekit render examples/split_on_wall.py` (also `escape_rotating_gap.py`, `destroy_on_contact.py`)
 - Melody + effects (M3): `uv run bouncekit render examples/midi_melody.py`; preview hot-reloads the scene file on save
 - Regenerate assets (M3): `uv run python scripts/make_assets.py` (writes `assets/midi/`, `assets/samples/`; output must stay byte-identical)
+- Params (M4): scripts declare `x = scene.param("x", default)`; override with `--set x=V` on render/preview/batch
+- Batch (M4): `uv run bouncekit batch examples/param_sweep.py --seeds 1-10 [--grid gap=30,60] [--set k=v] [--jobs N] [--out-dir out/] [--quiet]` (exit 1 if any job failed); each CLI render writes `<stem>.json` metadata beside the MP4
 
 ## Conventions
 - Determinism is non-negotiable: fixed timestep, `scene.rng` only, no wall-clock in simulation, insertion-ordered containers.
@@ -23,6 +25,7 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Runtime cap/tunnelling violations (split, spawn, resize) are refused silently and deterministically, never raised mid-render.
 - Public API: screen pixels, origin top-left, +y down; keyword-only options; dataclasses for config; raise `ConfigError` with field + value for bad config.
 - Audio: collision callbacks only record events; rules turn them into note triggers after each frame; the mixer runs once after simulation. Sample offsets use integer math on the physics step count (never `time * 48000`). 48 kHz stereo float.
+- Wall-clock time (M4) only in the CLI layer: progress bar, batch lines, metadata `render_seconds`; never in `Scene`'s simulation or drawing. `Scene.render` writes only the MP4 (metadata is the CLI's job). Batch jobs are independent `load_scene` calls (spawn workers).
 - Renderer only reads world state. Drawing goes through the `Renderer` protocol.
 - Effects (M3: trails, glow, particles, colour modes) are visual-only: never touch pymunk, `scene.rng` or `scene.events`; particle randomness uses `scene.fx_rng`; effect state advances per `scene.frame`, never per `draw` call. Effect-free scenes must keep M2 frame bytes; unpanned mixes must keep M1 audio bytes.
 - pymunk 7 API: `space.on_collision(...)`, `space.add_post_step_callback(...)` — don't copy pre-7 examples.
