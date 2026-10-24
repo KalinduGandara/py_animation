@@ -10,7 +10,8 @@
 - 2026-10-24: T-004 done: Renderer protocol (runtime_checkable), PygameRenderer (off-screen Surface; thick_line = filled quad + AA edges + round caps), Ball/CircleBoundary.draw, Scene.draw/frames (yield current frame then step); tests/test_render.py + tests/test_determinism.py; gate passes.
 - 2026-10-24: T-005 done: export/ffmpeg.py (`require_ffmpeg`, `FfmpegWriter` with frame-length and stderr-tail errors), `Scene.render` (checks ffmpeg before simulating, creates parent dirs); tests/test_export.py incl. real ffprobe check; gate passes.
 - 2026-10-24: T-006 done: cli.py (`load_scene` via runpy with `_overrides`, `render`/`preview` subcommands, `default_scene` for `Scene.run`, errors -> `error: ...` exit 2), `SceneLoadError`, `Scene.run`, `run_preview` placeholder; tests/test_cli.py + tests/fixtures; gate passes.
+- 2026-10-24: T-007 done: render/preview.py (`Preview` class with handle_event/tick/run, `run_preview(make_scene, scale, max_frames)` returns final scene), `Scene.preview` (restart reloads `sys.argv[0]` with same seed/duration); tests/test_preview.py headless; gate passes.
 
 ## Status
 
-In progress: M0. Next: T-007.
+In progress: M0. Next: T-008.

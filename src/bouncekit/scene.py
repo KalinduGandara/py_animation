@@ -189,6 +189,30 @@ class Scene:
                 writer.write(frame)
         return path
 
+    def preview(self, scale: float = 0.45) -> None:
+        """Play this scene in a live window (Space pause, Right step, R restart, Esc/Q quit).
+
+        The first run uses this instance; restarting reloads the running script
+        (``sys.argv[0]``) with this scene's seed and duration, since a scene is
+        simulated only once.
+
+        Raises:
+            SceneLoadError: on restart, if the running script cannot be reloaded.
+        """
+        from bouncekit import cli  # local import: cli imports this module
+        from bouncekit.render.preview import run_preview
+
+        first = [self]
+
+        def make() -> "Scene":
+            if first:
+                return first.pop()
+            return cli.load_scene(
+                Path(sys.argv[0]), seed=self.config.seed, duration=self.config.duration
+            )
+
+        run_preview(make, scale)
+
     def run(self) -> None:
         """Dispatch to the ``bouncekit`` CLI using ``sys.argv``; call from ``__main__``.
 

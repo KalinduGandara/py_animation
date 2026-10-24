@@ -32,7 +32,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: cli.py, scene.py, tests/test_cli.py, tests/fixtures/*.py
   - Done when: single/zero/many scenes, override-before-script, `__main__` skipped, missing file, and end-to-end `render` on a tiny fixture scene tested and passing.
 
-- [ ] T-007: Live preview window.
+- [x] T-007: Live preview window.
   - Requirements: FR-009
   - Files: render/preview.py, scene.py, tests/test_preview.py
   - Done when: preview runs headless (`SDL_VIDEODRIVER=dummy`) for N frames via a `max_frames` hook; key handling unit-tested via posted events (pause, step, restart, quit).
