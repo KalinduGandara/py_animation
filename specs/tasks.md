@@ -161,7 +161,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `render` without `--set` keeps `tiny_scene_seed9.mp4`.
     - Preview reload receives the same params.
 
-- [ ] T-402: Batch command.
+- [x] T-402: Batch command.
   - Scope:
     - `parse_seeds`, `parse_assignments`, `parse_grid` and `plan_jobs` (product order, naming, duplicate-name check, seed resolved after load when `--seeds` is omitted).
     - `run_batch` (in-process for `--jobs 1`; spawn `ProcessPoolExecutor` for `--jobs N`; worker crash → failed result).

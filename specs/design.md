@@ -1090,6 +1090,15 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 - `bouncekit render` now prints failures as `error: <ExceptionType>: <message>` (the `JobResult.error` text, as the batch `FAILED` lines will). Script exceptions that are not `BouncekitError`s now also exit 2 with that line instead of a traceback (FR-404 isolation applies to `run_job`).
 - `Scene.preview()` restarts reuse the scene's param overrides, like the CLI preview reload.
 
+### M4.7b Implementation notes (T-402)
+
+- The duplicate-name check in `plan_jobs` compares `(seed, suffix)` pairs, so it also works when `--seeds` is omitted (seed `None`, resolved after load): jobs then share the script seed and only the suffix can collide. The error names `--grid/--set` and both job indices.
+- A name given with both `--set` and `--grid` is rejected by `plan_jobs` (`ConfigError` naming `--grid`); repeats within `--set` or within `--grid` are rejected by `parse_assignments`/`parse_grid`.
+- `--jobs < 1` and a non-finite or non-positive `--duration` are checked by the CLI before planning (exit 2). A non-integer `--jobs` text is rejected by argparse (`type=int`), which also exits 2.
+- A `FAILED` line for a job whose name was never resolved (the script failed to load with `--seeds` omitted) shows the script stem instead of the MP4 path.
+- `run_batch` with `workers > 1` deletes the planned MP4/JSON of a crashed worker's job when the name is known; when it is not (seed resolved in the worker), no file name is available to clean up.
+- `--jobs N > 1` always uses the spawn pool, even for one job.
+
 ### M4.8 Progress (FR-408)
 
 - `Progress.enabled = stream.isatty()` when `enabled` is `None`. The CLI passes `enabled=False` for `--quiet`.

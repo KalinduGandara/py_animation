@@ -1,14 +1,25 @@
-"""Command-line interface: ``bouncekit render`` and ``bouncekit preview``."""
+"""Command-line interface: ``bouncekit render``, ``bouncekit preview`` and ``bouncekit batch``."""
 
 import argparse
+import math
 import runpy
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from bouncekit import scene as scene_module
-from bouncekit.batch import Job, parse_assignments, run_job
+from bouncekit.batch import (
+    Job,
+    JobResult,
+    parse_assignments,
+    parse_grid,
+    parse_seeds,
+    plan_jobs,
+    run_batch,
+    run_job,
+)
 from bouncekit.errors import BouncekitError, ConfigError, SceneLoadError
+from bouncekit.export.ffmpeg import require_ffmpeg
 from bouncekit.render.preview import run_preview
 from bouncekit.scene import Scene
 
@@ -73,9 +84,9 @@ def load_scene(
 
 def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="bouncekit", description="Render or preview a bouncekit scene script."
+        prog="bouncekit", description="Render, preview or batch-render a bouncekit scene script."
     )
-    sub = parser.add_subparsers(dest="command", required=True, metavar="{render,preview}")
+    sub = parser.add_subparsers(dest="command", required=True, metavar="{render,preview,batch}")
     scene_kwargs: dict[str, object] = {"type": Path, "help": "scene script (.py)"}
     if scene_optional:
         scene_kwargs["nargs"] = "?"
@@ -100,7 +111,66 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     )
     preview.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                          help="override a scene.param (repeatable)")  # fmt: skip
+
+    batch = sub.add_parser("batch", help="render the scene over seeds x param grids")
+    batch.add_argument("scene", **scene_kwargs)  # type: ignore[arg-type]
+    batch.add_argument("--seeds", metavar="SPEC",
+                       help="seeds such as 1-10 or 3,7,9 (default: the script's seed)")  # fmt: skip
+    batch.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
+                       help="override a scene.param in every job (repeatable)")  # fmt: skip
+    batch.add_argument("--grid", action="append", default=[], metavar="NAME=V1,V2,...",
+                       help="render every value of a scene.param (repeatable)")  # fmt: skip
+    batch.add_argument("--duration", type=float, help="override the duration in seconds")
+    batch.add_argument("--jobs", type=int, default=1, help="parallel worker processes (default 1)")
+    batch.add_argument("--out-dir", type=Path, default=Path("out"),
+                       help="output directory (default out)")  # fmt: skip
+    batch.add_argument("--quiet", action="store_true", help="hide per-job 'wrote' lines")
     return parser
+
+
+def _plan_batch(args: argparse.Namespace, script: Path) -> list[Job]:
+    """Validate the batch options and plan the jobs; ``ConfigError`` names the option."""
+    sets = parse_assignments(args.set, "--set")
+    grid = parse_grid(args.grid)
+    seeds = None if args.seeds is None else parse_seeds(args.seeds)
+    if args.jobs < 1:
+        raise ConfigError(f"--jobs must be an integer >= 1; got {args.jobs}")
+    duration: float | None = args.duration
+    if duration is not None and not (math.isfinite(duration) and duration > 0):
+        raise ConfigError(f"--duration must be a positive finite number; got {duration!r}")
+    return plan_jobs(
+        script, seeds=seeds, sets=sets, grid=grid, duration=duration, out_dir=args.out_dir
+    )
+
+
+def _run_batch_command(args: argparse.Namespace, script: Path) -> int:
+    """``bouncekit batch``: plan, check ffmpeg, run the jobs, report; returns the exit code."""
+    try:
+        jobs = _plan_batch(args, script)
+        require_ffmpeg()
+    except BouncekitError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return ERROR_EXIT
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+    total = len(jobs)
+
+    def report(result: JobResult) -> None:
+        if result.ok:
+            if not args.quiet:
+                print(
+                    f"[{result.index}/{total}] wrote {result.out} "
+                    f"({result.frames} frames, {result.seconds} s)",
+                    flush=True,
+                )
+        else:
+            shown = result.out if result.out is not None else script.stem
+            print(f"[{result.index}/{total}] FAILED {shown}: {result.error}", file=sys.stderr,
+                  flush=True)  # fmt: skip
+
+    results = run_batch(jobs, workers=args.jobs, on_result=report)
+    failed = sum(not r.ok for r in results)
+    print(f"batch: {total - failed} ok, {failed} failed")
+    return 1 if failed else 0
 
 
 def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -> int:
@@ -116,6 +186,8 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
     args = _build_parser(default_scene is not None).parse_args(args_list)
     script: Path | None = args.scene if args.scene is not None else default_scene
     assert script is not None  # argparse requires it unless default_scene is given
+    if args.command == "batch":
+        return _run_batch_command(args, script)
     try:
         overrides = parse_assignments(args.set, "--set")
     except ConfigError as exc:
