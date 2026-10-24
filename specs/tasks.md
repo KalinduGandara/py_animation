@@ -178,7 +178,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `--quiet` drops the `wrote` lines but keeps the summary.
     - Missing ffmpeg (monkeypatched) exits 2.
 
-- [ ] T-403: Progress bar.
+- [x] T-403: Progress bar.
   - Scope:
     - `progress.Progress`: TTY check, `enabled` override, 0.1 s throttle with an injected clock, ETA formatting, padding, `write()` clearing and redrawing, `close()` newline.
     - `Scene.render(progress=)` callback.

@@ -169,11 +169,12 @@ def plan_jobs(
     return jobs
 
 
-def run_job(job: Job) -> JobResult:
+def run_job(job: Job, *, progress: Callable[[int, int], None] | None = None) -> JobResult:
     """Load the job's script, render the MP4 and write its metadata JSON beside it.
 
     Any ``Exception`` makes the job fail: its MP4 and JSON are deleted if they
     exist and the error is returned in the result. ``KeyboardInterrupt`` propagates.
+    ``progress`` is passed to :meth:`Scene.render` (frames written, total frames).
     """
     from bouncekit.cli import load_scene  # local import: cli imports this module
 
@@ -186,7 +187,7 @@ def run_job(job: Job) -> JobResult:
         if out is None:
             name = f"{job.script.stem}_seed{scene.config.seed}{suffix(job.overrides)}.mp4"
             out = job.out_dir / name
-        scene.render(out)
+        scene.render(out, progress=progress)
         seconds = round(time.monotonic() - t0, 3)
         data = build_metadata(scene, script=str(job.script), video=out, render_seconds=seconds)
         write_metadata(out, data)

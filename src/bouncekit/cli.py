@@ -4,7 +4,7 @@ import argparse
 import math
 import runpy
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from bouncekit import scene as scene_module
@@ -20,6 +20,7 @@ from bouncekit.batch import (
 )
 from bouncekit.errors import BouncekitError, ConfigError, SceneLoadError
 from bouncekit.export.ffmpeg import require_ffmpeg
+from bouncekit.progress import Progress
 from bouncekit.render.preview import run_preview
 from bouncekit.scene import Scene
 
@@ -101,6 +102,7 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     )
     render.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                         help="override a scene.param (repeatable)")  # fmt: skip
+    render.add_argument("--quiet", action="store_true", help="hide the progress bar")
 
     preview = sub.add_parser("preview", help="play the scene in a window")
     preview.add_argument("scene", **scene_kwargs)  # type: ignore[arg-type]
@@ -124,7 +126,9 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     batch.add_argument("--jobs", type=int, default=1, help="parallel worker processes (default 1)")
     batch.add_argument("--out-dir", type=Path, default=Path("out"),
                        help="output directory (default out)")  # fmt: skip
-    batch.add_argument("--quiet", action="store_true", help="hide per-job 'wrote' lines")
+    batch.add_argument(
+        "--quiet", action="store_true", help="hide per-job 'wrote' lines and the progress bar"
+    )
     return parser
 
 
@@ -153,24 +157,41 @@ def _run_batch_command(args: argparse.Namespace, script: Path) -> int:
         return ERROR_EXIT
     args.out_dir.mkdir(parents=True, exist_ok=True)
     total = len(jobs)
+    bar = Progress(total, label="batch", unit="jobs", enabled=False if args.quiet else None)
+    finished = 0
 
     def report(result: JobResult) -> None:
+        nonlocal finished
         if result.ok:
             if not args.quiet:
-                print(
+                bar.write(
                     f"[{result.index}/{total}] wrote {result.out} "
                     f"({result.frames} frames, {result.seconds} s)",
-                    flush=True,
+                    stream=sys.stdout,
                 )
         else:
             shown = result.out if result.out is not None else script.stem
-            print(f"[{result.index}/{total}] FAILED {shown}: {result.error}", file=sys.stderr,
-                  flush=True)  # fmt: skip
+            bar.write(f"[{result.index}/{total}] FAILED {shown}: {result.error}",
+                      stream=sys.stderr)  # fmt: skip
+        finished += 1
+        bar.update(finished)
 
-    results = run_batch(jobs, workers=args.jobs, on_result=report)
+    bar.update(0)
+    try:
+        results = run_batch(jobs, workers=args.jobs, on_result=report)
+    finally:
+        bar.close()
     failed = sum(not r.ok for r in results)
     print(f"batch: {total - failed} ok, {failed} failed")
     return 1 if failed else 0
+
+
+def _frame_progress(bar: Progress) -> Callable[[int, int], None]:
+    def callback(done: int, total: int) -> None:
+        bar.total = total
+        bar.update(done)
+
+    return callback
 
 
 def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -> int:
@@ -203,7 +224,11 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
             out_dir=Path("out"),
             out=args.out,
         )
-        result = run_job(job)
+        bar = Progress(0, label="render", unit="frames", enabled=False if args.quiet else None)
+        try:
+            result = run_job(job, progress=_frame_progress(bar))
+        finally:
+            bar.close()
         if not result.ok:
             print(f"error: {result.error}", file=sys.stderr)
             return ERROR_EXIT

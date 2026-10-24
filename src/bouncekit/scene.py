@@ -969,13 +969,17 @@ class Scene:
             yield renderer.to_rgb_bytes()
             self.step_frame()
 
-    def render(self, out: str | Path) -> Path:
+    def render(
+        self, out: str | Path, *, progress: Callable[[int, int], None] | None = None
+    ) -> Path:
         """Simulate and encode the whole scene to an H.264 MP4 at ``out``.
 
         Parent directories are created. ffmpeg is checked before simulating. If
         any rule has an ``A.play`` or any note was triggered, the mix is limited to a
         true peak of ``audio.peak_dbfs`` and muxed in as 48 kHz stereo AAC; otherwise
-        the MP4 has no audio stream.
+        the MP4 has no audio stream. ``progress``, if given, is called with
+        ``(frames_written, total_frames)`` after each frame is written; it never
+        affects the output.
 
         Raises:
             FfmpegError: if ffmpeg is missing or fails.
@@ -986,14 +990,18 @@ class Scene:
         cfg = self.config
         if not self._engine.rules:
             with FfmpegWriter(path, cfg.width, cfg.height, cfg.fps) as writer:
-                for frame in self.frames():
+                for done, frame in enumerate(self.frames(), 1):
                     writer.write(frame)
+                    if progress is not None:
+                        progress(done, self.total_frames)
             return path
         with tempfile.TemporaryDirectory(dir=path.parent, prefix=".bouncekit-") as tmp:
             video, wav = Path(tmp) / "video.mp4", Path(tmp) / "audio.wav"
             with FfmpegWriter(video, cfg.width, cfg.height, cfg.fps) as writer:
-                for frame in self.frames():
+                for done, frame in enumerate(self.frames(), 1):
                     writer.write(frame)
+                    if progress is not None:
+                        progress(done, self.total_frames)
             if not (self.has_sound or self._triggers):
                 video.replace(path)
                 return path
