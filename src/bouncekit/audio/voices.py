@@ -209,7 +209,51 @@ def _normalise(y: NDArray[np.float64]) -> NDArray[np.float64]:
     return y
 
 
-Voice = Sine | Triangle | Pluck | Marimba
+_SAMPLE_ATTACK = SAMPLE_RATE // 1000  # 1 ms
+_SAMPLE_RELEASE = SAMPLE_RATE * 5 // 1000  # 5 ms
+
+
+@dataclass(frozen=True, eq=False)
+class Sample:
+    """A recorded sound played at any pitch by linear-interpolation resampling (FR-308).
+
+    Build it with :func:`bouncekit.sound.sample`. ``data`` is the file's mono
+    (channel-averaged) signal at ``rate`` Hz, read-only; it sounds at ``root_hz``
+    when played unchanged. Compared and hashed by identity.
+    """
+
+    path: str
+    root_hz: float
+    rate: int
+    data: NDArray[np.float64]
+    duration: float | None = None
+
+    def render(self, hz: float, seed: int) -> NDArray[np.float64]:
+        """Render the sample shifted to ``hz`` (``seed`` is unused).
+
+        The source is read at index ``i * ratio`` for output sample ``i``, with
+        ``ratio = (hz / root_hz) * (rate / 48000)``, for ``floor((len - 1) / ratio) + 1``
+        samples (at most ``round(duration * 48000)``). A 1 ms linear attack from 0 and
+        a 5 ms linear release to 0 are applied, then the peak is normalised to 1.
+        """
+        ratio = (hz / self.root_hz) * (self.rate / SAMPLE_RATE)
+        n = math.floor((len(self.data) - 1) / ratio) + 1
+        if self.duration is not None:
+            n = min(n, round(self.duration * SAMPLE_RATE))
+        y = np.interp(
+            np.arange(n, dtype=np.float64) * ratio,
+            np.arange(len(self.data), dtype=np.float64),
+            self.data,
+        )
+        ramp = min(_SAMPLE_ATTACK, n)
+        y[:ramp] *= np.arange(ramp, dtype=np.float64) / _SAMPLE_ATTACK
+        k = min(_SAMPLE_RELEASE, n)
+        if k:
+            y[n - k :] *= np.linspace(1.0, 0.0, k)
+        return _normalise(y)
+
+
+Voice = Sine | Triangle | Pluck | Marimba | Sample
 
 VOICES: dict[str, Voice] = {
     "sine": Sine(),
@@ -217,7 +261,7 @@ VOICES: dict[str, Voice] = {
     "pluck": Pluck(),
     "marimba": Marimba(),
 }
-_VOICE_TYPES = (Sine, Triangle, Pluck, Marimba)
+_VOICE_TYPES = (Sine, Triangle, Pluck, Marimba, Sample)
 
 
 def resolve_voice(voice: object) -> Voice:

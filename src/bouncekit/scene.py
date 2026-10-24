@@ -510,7 +510,10 @@ class Scene:
         dispatch order). Only notes that play advance a ``Scale``'s cursor (FR-103).
         A ``Melody`` hit plays its next chord: one note per chord note at the same
         offset, each at the hit's gain times its velocity, counted as one trigger for
-        the per-frame cap and the retrigger interval (FR-307).
+        the per-frame cap and the retrigger interval (FR-307). With ``play.pan > 0``
+        an event with a position pans its notes by
+        ``play.pan * (2 * clamp(x / width, 0, 1) - 1)``; otherwise they are centred
+        (FR-309).
         """
         cfg = self.config
         audio = cfg.audio
@@ -545,6 +548,10 @@ class Scene:
         if speed is not None:
             gain *= min(1.0, speed / audio.reference_speed) ** 0.5
         offset = sample_offset(ev.step, cfg.fps, cfg.substeps)
+        pan = 0.0
+        if play.pan > 0 and ev.position is not None:
+            across = min(max(ev.position[0] / cfg.width, 0.0), 1.0)
+            pan = play.pan * (2.0 * across - 1.0)
         for hz, factor in notes:
             self._triggers.append(
                 NoteTrigger(
@@ -553,6 +560,7 @@ class Scene:
                     voice=src.voice,
                     hz=hz,
                     gain=gain * factor,
+                    pan=pan,
                 )
             )
         self._last_trigger[(play, a)] = ev.step

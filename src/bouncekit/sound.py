@@ -1,6 +1,6 @@
-"""Sound sources for collision rules (FR-102, FR-103, FR-307).
+"""Sound sources for collision rules (FR-102, FR-103, FR-307) and the sample voice (FR-308).
 
-``S.note(...)``, ``S.scale(...)`` and ``S.melody(...)``.
+``S.note(...)``, ``S.scale(...)``, ``S.melody(...)`` and ``S.sample(...)``.
 
 Pitches are note names (``"C5"``, ``"F#4"``, ``"Bb3"``; octave -1..9, A4 = 440 Hz,
 12-tone equal temperament), MIDI numbers (``int`` 0..127) or frequencies in Hz
@@ -12,17 +12,22 @@ import os
 import re
 from dataclasses import dataclass
 
+import numpy as np
+import soundfile as sf
+
 from bouncekit.audio.midi import read_chords
 from bouncekit.audio.voices import (
     ADSR,
     VOICES,
     Marimba,
     Pluck,
+    Sample,
     Sine,
     Triangle,
     Voice,
     resolve_voice,
 )
+from bouncekit.config import _positive_number
 from bouncekit.errors import ConfigError
 
 __all__ = [
@@ -34,6 +39,7 @@ __all__ = [
     "Note",
     "Pitch",
     "Pluck",
+    "Sample",
     "Scale",
     "Sine",
     "Source",
@@ -43,6 +49,7 @@ __all__ = [
     "melody",
     "note",
     "pitch_to_hz",
+    "sample",
     "scale",
 ]
 
@@ -219,3 +226,44 @@ def melody(
             notes.append((hz, velocity / 127))
         out.append(tuple(notes))
     return Melody(chords=tuple(out), voice=resolve_voice(voice))
+
+
+def sample(
+    path: str | os.PathLike[str],
+    *,
+    root: Pitch = "C4",
+    duration: float | None = None,
+) -> Sample:
+    """Return a voice that plays an audio file pitch-shifted to each note (FR-308).
+
+    Use it as ``voice=`` of :func:`note`, :func:`scale` or :func:`melody`. The file
+    is read now with ``soundfile`` (relative paths resolve against the current
+    directory) and mixed to mono by averaging its channels. ``root`` is the pitch
+    the recording sounds at; a note at ``hz`` resamples it by linear interpolation
+    with step ``(hz / root_hz) * (file_rate / 48000)`` (so higher notes are also
+    shorter). ``duration`` (seconds) caps each rendered note's length.
+
+    Raises:
+        ConfigError: if the file is missing or unreadable, has fewer than 2 frames,
+            is silent or not finite, or ``root``/``duration`` is invalid.
+    """
+    try:
+        root_hz = pitch_to_hz(root)
+    except ConfigError as exc:
+        raise ConfigError(f"sample: root {exc}") from None
+    if duration is not None:
+        duration = _positive_number("duration", duration)
+    name = os.fspath(path)
+    try:
+        frames, rate = sf.read(name, dtype="float64", always_2d=True)
+    except (OSError, RuntimeError, ValueError, TypeError) as exc:
+        raise ConfigError(f"sample: cannot read {name}: {exc}") from None
+    data = np.ascontiguousarray(frames.mean(axis=1), dtype=np.float64)
+    if len(data) < 2:
+        raise ConfigError(f"sample: {name} must have at least 2 frames; got {len(data)}")
+    if not np.all(np.isfinite(data)):
+        raise ConfigError(f"sample: {name} contains non-finite samples")
+    if not np.any(data):
+        raise ConfigError(f"sample: {name} is silent")
+    data.setflags(write=False)
+    return Sample(path=name, root_hz=root_hz, rate=int(rate), data=data, duration=duration)

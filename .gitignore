@@ -7,3 +7,4 @@ __pycache__/
 out/
 *.mp4
 *.wav
+!assets/samples/*.wav

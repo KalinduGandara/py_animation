@@ -1,10 +1,11 @@
-"""Offline mixer, voice stealing and master bus (FR-106, FR-107).
+"""Offline mixer, voice stealing, stereo pan and master bus (FR-106, FR-107, FR-309).
 
 All sample positions are derived from integer physics step counts with exact
 integer arithmetic (rounding half up), so audio lines up with the simulation
 regardless of floating-point time.
 """
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -21,6 +22,7 @@ __all__ = [
     "limit_true_peak",
     "mix",
     "num_samples",
+    "pan_gains",
     "sample_offset",
     "true_peak",
 ]
@@ -37,13 +39,36 @@ _TP_MARGIN = 1 << 12  # context on each side of a block (edge error ~ 1 / (pi * 
 
 @dataclass(frozen=True)
 class NoteTrigger:
-    """A note to play: sample 0 of ``voice.render(hz, seed)`` lands at ``offset``."""
+    """A note to play: sample 0 of ``voice.render(hz, seed)`` lands at ``offset``.
+
+    ``pan`` in [-1, 1] places it from hard left to hard right (0: centred, FR-309).
+    """
 
     step: int
     offset: int
     voice: Voice
     hz: float
     gain: float
+    pan: float = 0.0
+
+
+_SQRT2 = math.sqrt(2.0)
+
+
+def pan_gains(pan: float) -> tuple[float, float]:
+    """Equal-power ``(left, right)`` gains for ``pan`` in [-1, 1] (FR-309).
+
+    ``L = sqrt(2) * cos(theta)``, ``R = sqrt(2) * sin(theta)`` with
+    ``theta = (pan + 1) * pi / 4``, so ``L**2 + R**2 == 2`` and ``pan == 0`` gives
+    exactly ``(1.0, 1.0)`` (a centred note is the M1 note). Computed from the angle
+    to the nearer side, so the far channel is exactly 0 at ``pan = +-1`` and
+    ``pan_gains(-p)`` mirrors ``pan_gains(p)`` exactly.
+    """
+    if pan == 0:
+        return (1.0, 1.0)
+    away = (1.0 - abs(pan)) * math.pi / 4  # angle from the nearer side
+    near, far = _SQRT2 * math.cos(away), _SQRT2 * math.sin(away)
+    return (near, far) if pan < 0 else (far, near)
 
 
 def sample_offset(step: int, fps: int, substeps: int) -> int:
@@ -63,7 +88,7 @@ def num_samples(frames: int, fps: int) -> int:
 def mix(
     triggers: Sequence[NoteTrigger], *, length: int, config: AudioConfig, seed: int
 ) -> NDArray[np.float32]:
-    """Mix ``triggers`` into a centred stereo buffer of shape ``(length, 2)``.
+    """Mix ``triggers`` into a stereo buffer of shape ``(length, 2)``.
 
     Triggers are taken in order of ``offset`` (ties keep their order). When a note
     starts while ``config.max_polyphony`` notes are still sounding, the oldest is
@@ -72,6 +97,11 @@ def mix(
     past the end are dropped. The master bus applies ``tanh``, scales the result so
     its peak is ``config.peak_dbfs`` (silence stays silent) and fades out the last
     5 ms.
+
+    When every trigger has ``pan == 0`` both channels are the same centred mix
+    (the M1 path, byte for byte). Otherwise each note is added to the left and
+    right channels scaled by :func:`pan_gains`, ``tanh`` runs per channel and one
+    common peak normalisation keeps the stereo image (FR-309).
     """
     acc = np.zeros(length, dtype=np.float64)
     cache: dict[tuple[Voice, float, int], NDArray[np.float64]] = {}
@@ -95,6 +125,9 @@ def mix(
             ends[oldest] = min(ends[oldest], start + _STEAL_FADE)
         sounding.append(i)
 
+    if any(trig.pan != 0 for trig in ordered):
+        return _mix_stereo(ordered, notes, ends, cut, length=length, config=config)
+
     for i, trig in enumerate(ordered):
         start = trig.offset
         end = min(ends[i], length)
@@ -114,6 +147,39 @@ def mix(
     stereo = np.empty((length, 2), dtype=np.float32)
     stereo[:, 0] = out
     stereo[:, 1] = out
+    return stereo
+
+
+def _mix_stereo(
+    ordered: Sequence[NoteTrigger],
+    notes: Sequence[NDArray[np.float64]],
+    ends: Sequence[int],
+    cut: dict[int, int],
+    *,
+    length: int,
+    config: AudioConfig,
+) -> NDArray[np.float32]:
+    """Accumulate panned notes per channel; one master bus over both channels (FR-309)."""
+    acc = np.zeros((length, 2), dtype=np.float64)
+    for i, trig in enumerate(ordered):
+        start = trig.offset
+        end = min(ends[i], length)
+        seg = notes[i][: end - start] * (trig.gain * NOTE_LEVEL)
+        if i in cut:
+            k = cut[i] - start
+            seg[k:] *= np.linspace(1.0, 0.0, _STEAL_FADE)[: len(seg) - k]
+        left, right = pan_gains(trig.pan)
+        acc[start:end, 0] += seg * left
+        acc[start:end, 1] += seg * right
+
+    out = np.tanh(acc)
+    peak = float(np.abs(out).max()) if length else 0.0
+    if peak > 0.0:
+        out *= 10 ** (config.peak_dbfs / 20) / peak
+    fade = min(_END_FADE, length)
+    if fade:
+        out[length - fade :] *= np.linspace(1.0, 0.0, fade)[:, None]
+    stereo: NDArray[np.float32] = out.astype(np.float32)
     return stereo
 
 

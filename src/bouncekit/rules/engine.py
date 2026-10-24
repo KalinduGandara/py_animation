@@ -91,7 +91,7 @@ class RuleEngine:
         self._last_pair: dict[tuple[int, int, int], int] = {}
         self._last_object: dict[tuple[int, int], int] = {}
         # ctx.play(source, gain) shares one Play per (source, gain): lookup only.
-        self._shared_play: dict[tuple[Source, float], Play] = {}
+        self._shared_play: dict[tuple[Source, float, float], Play] = {}
         # Per-kind views in registration order (iterated).
         self._escape_rules: list[Rule] = []
         self._timer_rules: list[Rule] = []
@@ -120,8 +120,8 @@ class RuleEngine:
                 self._last_object[(rule, child)] = step
 
     def shared_play(self, action: Play) -> Play:
-        """Return the play action shared by every ``ctx.play`` with the same source and gain."""
-        return self._shared_play.setdefault((action.source, action.gain), action)
+        """Return the play action shared by every ``ctx.play`` with the same source, gain, pan."""
+        return self._shared_play.setdefault((action.source, action.gain, action.pan), action)
 
     @property
     def has_play(self) -> bool:

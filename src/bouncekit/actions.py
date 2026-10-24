@@ -75,12 +75,15 @@ def _target(value: object) -> Target:
 class Play:
     """Play a note from ``source`` at ``gain`` when the rule fires.
 
+    ``pan`` in [0, 1] is the stereo width: a note is panned by
+    ``pan * (2 * x / width - 1)`` from the event's x position (FR-309).
     Compared by identity: each ``play(...)`` call is a distinct action. Not
     subject to rule cooldowns; the audio trigger policy applies (FR-106).
     """
 
     source: Source
     gain: float = 1.0
+    pan: float = 0.0
 
     def run(self, ctx: "ActionContext") -> None:
         """Trigger the note now (audio only)."""
@@ -258,21 +261,28 @@ ACTION_TYPES: tuple[type, ...] = (
 )
 
 
-def play(source: Source, *, gain: float = 1.0) -> Play:
+def play(source: Source, *, gain: float = 1.0, pan: float = 0.0) -> Play:
     """Return an action that plays ``source`` at ``gain`` (>= 0).
 
     ``source`` is ``S.note(...)``, ``S.scale(...)`` or ``S.melody(...)`` (a melody
-    plays its next chord per trigger, FR-307).
+    plays its next chord per trigger, FR-307). ``pan`` in [0, 1] pans each note by
+    the event's x position: ``pan * (2 * clamp(x / width, 0, 1) - 1)`` from hard
+    left (-1) to hard right (1); events without a position (timers, conditions)
+    play centred. ``pan=0`` keeps every note centred (FR-309).
 
     Raises:
-        ConfigError: if ``source`` is not a sound source or ``gain`` is negative.
+        ConfigError: if ``source`` is not a sound source, ``gain`` is negative or
+            ``pan`` is not a number in [0, 1].
     """
     if not isinstance(source, Note | Scale | Melody):
         raise ConfigError(
             "source must be a sound source such as S.note(...), S.scale(...) or "
             f"S.melody(...); got {source!r}"
         )
-    return Play(source=source, gain=_non_negative_number("gain", gain))
+    gain = _non_negative_number("gain", gain)
+    if isinstance(pan, bool) or not isinstance(pan, int | float) or not 0.0 <= pan <= 1.0:
+        raise ConfigError(f"pan must be a number in [0, 1]; got {pan!r}")
+    return Play(source=source, gain=gain, pan=float(pan))
 
 
 def destroy(*, target: Target = "a") -> Destroy:

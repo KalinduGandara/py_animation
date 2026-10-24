@@ -329,16 +329,18 @@ class ActionContext:
             capacity=cfg.effects.max_particles,
         )
 
-    def play(self, source: Source, *, gain: float = 1.0) -> None:
+    def play(self, source: Source, *, gain: float = 1.0, pan: float = 0.0) -> None:
         """Trigger ``source`` now, subject to the audio trigger policy (FR-106, FR-211).
 
-        Calls with an equal ``(source, gain)`` share one retrigger timer per subject
-        ``a``, like a single ``A.play`` action.
+        Calls with an equal ``(source, gain, pan)`` share one retrigger timer per
+        subject ``a``, like a single ``A.play`` action. ``pan`` in [0, 1] pans the
+        note by the event's x position, as for ``A.play`` (FR-309).
 
         Raises:
-            ConfigError: if ``source`` is not a sound source or ``gain`` is negative.
+            ConfigError: if ``source`` is not a sound source, ``gain`` is negative or
+                ``pan`` is not a number in [0, 1].
         """
-        action = play(source, gain=gain)
+        action = play(source, gain=gain, pan=pan)
         self._play_action(self.scene._engine.shared_play(action))
 
     def _play_action(self, action: Play) -> None:
