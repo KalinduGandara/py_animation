@@ -118,6 +118,7 @@ class SceneConfig:
     ``background`` accepts a colour string or tuple and is stored as an RGB tuple.
     ``audio`` holds the sound settings (:class:`AudioConfig`). ``rule_cooldown`` is
     the default per-pair cooldown of collision rules in seconds (FR-204).
+    ``max_balls`` caps the number of live balls (FR-205).
     """
 
     width: int = 1080
@@ -131,6 +132,7 @@ class SceneConfig:
     max_speed: float = 4000.0
     audio: AudioConfig = field(default_factory=AudioConfig)
     rule_cooldown: float = 0.05
+    max_balls: int = 1000
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio, AudioConfig):
@@ -139,6 +141,7 @@ class SceneConfig:
         _positive_even_int("height", self.height)
         _positive_int("fps", self.fps)
         _positive_int("substeps", self.substeps)
+        _positive_int("max_balls", self.max_balls)
         if type(self.seed) is not int:
             raise ConfigError(f"seed must be an integer; got {self.seed!r}")
         duration = _positive_number("duration", self.duration)

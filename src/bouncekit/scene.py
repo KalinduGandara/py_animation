@@ -28,7 +28,7 @@ from bouncekit.export.audio import write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
-from bouncekit.rules.commands import Command, apply
+from bouncekit.rules.commands import BallSpec, Command, apply
 from bouncekit.rules.engine import METHOD, SUBJECTS, Rule, RuleEngine, RuleKind
 from bouncekit.sound import Scale
 from bouncekit.world.ball import Ball
@@ -65,11 +65,14 @@ class Scene:
         max_speed: float = 4000.0,
         audio: AudioConfig | None = None,
         rule_cooldown: float = 0.05,
+        max_balls: int = 1000,
     ) -> None:
         """Validate the settings and create an empty world.
 
         ``audio`` defaults to ``AudioConfig()``. ``rule_cooldown`` is the default
         per-pair cooldown of collision rules in seconds (see :meth:`on_collision`).
+        ``max_balls`` caps the live balls: ``add_ball`` beyond it raises, and splits or
+        spawns beyond it are refused at runtime.
 
         Raises:
             ConfigError: if any setting is invalid.
@@ -86,6 +89,7 @@ class Scene:
             "max_speed": max_speed,
             "audio": AudioConfig() if audio is None else audio,
             "rule_cooldown": rule_cooldown,
+            "max_balls": max_balls,
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
@@ -222,6 +226,33 @@ class Scene:
             return Rule("collision", items, len(self._engine.rules), tag_a, tag_b, pair, per_object)
 
         return self._register("collision", handlers, make)
+
+    @overload
+    def on_spawn(self, tag: str, handlers: None = None) -> Callable[[F], F]: ...
+
+    @overload
+    def on_spawn(self, tag: str, handlers: Sequence[Handler]) -> None: ...
+
+    def on_spawn(
+        self, tag: str, handlers: Sequence[Handler] | None = None
+    ) -> Callable[[F], F] | None:
+        """When a ball carrying ``tag`` is spawned (``A.spawn`` or a split child), run ``handlers``.
+
+        Callables are called as ``f(ctx, obj, event)``; subject ``a`` is the new ball
+        (there is no ``b``). The spawn event is dispatched at the step after the one
+        that created the ball, so spawn chains grow one level per step. Without
+        ``handlers``, returns a decorator.
+
+        Raises:
+            ConfigError: for an empty or non-string tag, bad handlers, or an action
+                targeting subject ``"b"``.
+        """
+        _check_tag("tag", tag)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("spawn", items, len(self._engine.rules), tag)
+
+        return self._register("spawn", handlers, make)
 
     @overload
     def on_destroy(self, tag: str, handlers: None = None) -> Callable[[F], F]: ...
@@ -374,6 +405,40 @@ class Scene:
         self._events.append(ev)
         self._cascade.append(ev)
 
+    def _spawn_ball(self, spec: BallSpec, *, generation: int) -> Ball:
+        """Add a ball now (command application) and log its spawn event (for the next step)."""
+        ball = Ball(
+            self.space,
+            pos=spec.pos,
+            radius=spec.radius,
+            velocity=spec.velocity,
+            elasticity=spec.elasticity,
+            color=spec.color,
+            tags=spec.tags,
+        )
+        ball.generation = generation
+        self._register_object(ball, [ball.shape])
+        self._balls.append(ball)
+        ev = Event(
+            "spawn",
+            self._step,
+            self.frame,
+            self._step / self._rate,
+            (ball,),
+            math.hypot(*ball.velocity),
+            ball.position,
+        )
+        self._events.append(ev)
+        self._cascade.append(ev)
+        return ball
+
+    def _inherit(self, parent: Ball, child: Ball) -> None:
+        """Copy ``parent``'s rule cooldown and note retrigger timestamps to ``child`` (C7)."""
+        self._engine.inherit(self._indices[parent], self._indices[child])
+        for (action, obj), step in list(self._last_trigger.items()):
+            if obj is parent:
+                self._last_trigger[(action, child)] = step
+
     def audio_buffer(self) -> NDArray[np.float32]:
         """Mix the notes triggered so far: float32, shape ``(n, 2)``, 48 kHz.
 
@@ -439,9 +504,15 @@ class Scene:
         """Add a dynamic ball; its speed is clamped to ``config.max_speed``.
 
         Raises:
-            ConfigError: if any option is invalid, or a ball at ``max_speed`` could
-                pass through a ring in one step (see ``_check_tunnelling``).
+            ConfigError: if any option is invalid, the scene already has
+                ``config.max_balls`` live balls, or a ball at ``max_speed`` could pass
+                through a ring in one step (see ``_check_tunnelling``).
         """
+        if len(self._balls) >= self.config.max_balls:
+            raise ConfigError(
+                f"max_balls is {self.config.max_balls}; cannot add another ball "
+                f"(raise Scene(max_balls=...))"
+            )
         ball = Ball(
             self.space,
             pos=pos,
@@ -463,15 +534,19 @@ class Scene:
         A collision is caught only if the ball cannot move past a segment's centre
         line in one step, so per-step travel must be below ``radius + thickness / 2``.
         """
-        travel = self.config.max_speed * self._dt
-        reach = ball.radius + ring.thickness / 2
-        if travel >= reach:
+        if self._tunnels(ball.radius, ring):
+            travel = self.config.max_speed * self._dt
+            reach = ball.radius + ring.thickness / 2
             raise ConfigError(
                 f"ball radius {ball.radius} with ring thickness {ring.thickness} could tunnel: "
                 f"at max_speed {self.config.max_speed} a ball moves {travel:.2f} px per step "
                 f"but radius + thickness/2 is only {reach:.2f} px; increase substeps, "
                 f"lower max_speed, or use a larger ball or thicker ring"
             )
+
+    def _tunnels(self, radius: float, ring: CircleBoundary) -> bool:
+        """Whether a ball of ``radius`` at ``max_speed`` could pass through ``ring`` in one step."""
+        return self.config.max_speed * self._dt >= radius + ring.thickness / 2
 
     def step_frame(self) -> None:
         """Advance the simulation by one frame (``substeps`` fixed physics steps).

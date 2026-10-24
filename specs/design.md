@@ -587,6 +587,15 @@ class Rule:
 
 Constant speed (FR-212): in the step loop right after `clamp_speed`: `if ball.constant_speed: ball.renormalize()` (scale to `target_speed` when speed > 0). `target_speed ≤ max_speed` is validated at creation, so the clamp and the renormalisation never fight.
 
+### M2.5a Implementation notes (T-202)
+
+- `A.spawn`/`ctx.spawn` do not take `constant_speed` yet: constant speed (FR-212) arrives with T-204, which adds the option to `spawn`, `add_ball` and the split inheritance (the split speed `s` is `|v|` until then). Avoids a parameter that silently does nothing.
+- `ctx.split(ring)` is accepted and ignored (FR-206 no-op), matching `A.split` on a ring subject; any other non-handle raises `ConfigError`.
+- Spawned balls are not speed-clamped at creation (as `add_ball`); the post-step clamp applies from the next step. The spawn event's `speed` is the ball's speed as created.
+- Callable results are validated when evaluated (`ConfigError` naming `pos`/`velocity`/`color`, raised in the handler that called `spawn`); all callables run before the cap/tunnelling check, so a refused spawn still consumes the same `rng` values (deterministic).
+- Cooldown inheritance copies every `last_pair`/`last_object` entry of the parent's index to the child (`RuleEngine.inherit`) and every `(play, parent)` retrigger timestamp to `(play, child)`; the copy loops are over lookup dicts and do not affect any iteration order.
+- `Scene._tunnels(radius, ring)` is the shared predicate; `_check_tunnelling` raises with it at script time, split/spawn refuse with it at runtime.
+
 ### M2.6 Determinism strategy (NFR-201)
 
 - One ordered pipeline per step (M2.1); all containers iterated are lists in insertion order; dicts/sets keyed by monotonic object indices or rule indices are lookup-only; `id()` never orders anything.

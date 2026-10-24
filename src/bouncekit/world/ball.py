@@ -52,6 +52,22 @@ class Ball:
         space.add(self.body, self.shape)
         self.alive: bool = True
         """``False`` once the ball has been destroyed (removed from its scene)."""
+        self.generation: int = 0
+        """How many splits produced this ball: 0 for ``add_ball``/spawn, parent + 1 for a split."""
+
+    def set_radius(self, radius: float) -> None:
+        """Change the radius, keeping density 1 (mass = pi * r^2, moment updated).
+
+        Meant to be called between physics steps (the scene applies it after dispatch).
+
+        Raises:
+            ConfigError: if ``radius`` is not a positive finite number.
+        """
+        self._radius = _positive_number("radius", radius)
+        self.shape.unsafe_set_radius(self._radius)
+        mass = math.pi * self._radius**2
+        self.body.mass = mass
+        self.body.moment = pymunk.moment_for_circle(mass, 0, self._radius)
 
     def clamp_speed(self, max_speed: float) -> None:
         """Scale the velocity down to ``max_speed`` if it is faster, keeping direction."""

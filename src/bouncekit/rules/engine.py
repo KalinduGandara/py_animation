@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from bouncekit.actions import Destroy, Handler, Play
+from bouncekit.actions import Destroy, Handler, Play, Spawn, Split
 from bouncekit.events import Event, WorldObject
 from bouncekit.rules.context import ActionContext
 from bouncekit.sound import Source
@@ -13,19 +13,23 @@ if TYPE_CHECKING:
 
 __all__ = ["Rule", "RuleEngine", "RuleKind"]
 
-type RuleKind = Literal["collision", "destroy"]
+type RuleKind = Literal["collision", "spawn", "destroy"]
 
 # Registration method that creates each rule kind, for error messages.
-METHOD: dict[str, str] = {"collision": "on_collision", "destroy": "on_destroy"}
+METHOD: dict[str, str] = {
+    "collision": "on_collision",
+    "spawn": "on_spawn",
+    "destroy": "on_destroy",
+}
 # Subjects each rule kind provides to its actions' ``target``.
-SUBJECTS: dict[str, tuple[str, ...]] = {"collision": ("a", "b"), "destroy": ("a",)}
+SUBJECTS: dict[str, tuple[str, ...]] = {"collision": ("a", "b"), "spawn": ("a",), "destroy": ("a",)}
 
 
 @dataclass(eq=False)
 class Rule:
     """One registration: when an event of ``kind`` matches, run ``handlers`` in order.
 
-    ``tag_a``/``tag_b``: collision tags (``tag_a`` alone for destroy rules).
+    ``tag_a``/``tag_b``: collision tags (``tag_a`` alone for spawn/destroy rules).
     ``cooldown``/``object_cooldown``: seconds (collision rules only).
     ``index``: registration order, used as a lookup key for cooldown state.
     """
@@ -60,6 +64,16 @@ class RuleEngine:
     def add(self, rule: Rule) -> None:
         """Register ``rule`` after the existing ones."""
         self.rules.append(rule)
+
+    def inherit(self, parent: int, child: int) -> None:
+        """Give object index ``child`` the cooldown timestamps of ``parent`` (split, C7)."""
+        for (rule, i, j), step in list(self._last_pair.items()):
+            if parent in (i, j):
+                other = j if i == parent else i
+                self._last_pair[(rule, min(child, other), max(child, other))] = step
+        for (rule, i), step in list(self._last_object.items()):
+            if i == parent:
+                self._last_object[(rule, child)] = step
 
     def shared_play(self, action: Play) -> Play:
         """Return the play action shared by every ``ctx.play`` with the same source and gain."""
@@ -118,7 +132,7 @@ class RuleEngine:
             if gated:
                 continue
             fired = True
-            if isinstance(handler, Destroy):
+            if isinstance(handler, Destroy | Split | Spawn):
                 handler.run(ctx)
             elif rule.kind == "collision":
                 handler(ctx, a, b, ev)
