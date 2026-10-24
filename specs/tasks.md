@@ -41,3 +41,29 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Requirements: FR-011, NFR-002, NFR-006, NFR-007
   - Files: examples/single_ball.py, README.md
   - Done when: `uv run bouncekit render examples/single_ball.py` produces `out/single_ball_seed42.mp4` that ffprobe reports as 1080×1920, 60 fps, h264, yuv420p; README has quickstart + API overview; full suite < 60 s.
+
+---
+
+## M1 — Audio pipeline
+
+Same per-task loop as M0: tests first → implement → gate (`uv run pytest -q && uv run ruff check . && uv run mypy`) → tick here → log in `progress.md` → commit `feat(<area>): T-10X <desc> [FR-…]`.
+
+- [ ] T-101: Vertical slice — collision event log, `S.note` + `A.play` + `scene.on_collision`, `Sine` voice, basic mixer (exact offsets, tanh + peak normalise + end fade, stereo), `scene.audio_buffer()`, WAV + mux in `render`. Add `soundfile` to runtime deps (`uv add soundfile`).
+  - Requirements: FR-101, FR-102 (note, pitch parsing), FR-104, FR-105 (Sine + ADSR only), FR-107, FR-109, NFR-101, NFR-102, NFR-103
+  - Files: pyproject.toml, uv.lock, src/bouncekit/events.py, sound.py, actions.py, audio/__init__.py, audio/voices.py, audio/mixer.py, export/audio.py, export/ffmpeg.py, config.py (AudioConfig with defaults, validation can be minimal here), scene.py, __init__.py; tests/test_events.py, tests/test_sound.py, tests/test_mixer.py, tests/test_audio_export.py
+  - Done when: tests pass for — event `step`/`time` of a ball dropped onto a ring equal the analytic substep; one event per seam hit; no events while a ball rests/rolls on the ring after settling; event speed ≈ pre-impact speed; handler never mutates the space; pitch parsing (names, sharps/flats, MIDI, Hz, errors); `sample_offset` exact for chosen (fps, substeps, step) incl. half-up; `num_samples`; isolated note's first non-zero sample at offset/offset+1 and silence before; 200 full-gain triggers peak ≤ 1.0 and peak == 10**(-1/20) within 1e-6; same seed → identical `audio_buffer()` bytes and events, different seed differs; tiny real render with a sound rule → ffprobe shows `aac`, 48000 Hz, 2 channels, durations match within 50 ms, temp files removed; scene without sound rules still yields no audio stream; mux failure → `FfmpegError` with stderr; on_collision rejects non-Play actions/bad tags.
+
+- [ ] T-102: Remaining voices — `Triangle`, `Pluck` (Karplus-Strong, seeded noise), `Marimba`; voice name lookup + `ConfigError` for unknown names and bad parameters; per-mix render cache keyed `(voice, hz, seed)`.
+  - Requirements: FR-102 (voice argument), FR-105, NFR-101
+  - Files: src/bouncekit/audio/voices.py, audio/mixer.py, sound.py, tests/test_voices.py
+  - Done when: tests pass for — every voice: length = round(duration·48000), first sample 0.0, peak ≤ 1, finite; dominant frequency (zero crossings or FFT in the test) within 2% of hz for 220/440/880 Hz; Pluck identical for same (seed, hz) and different for different seeds; Marimba drops partials above 20 kHz; parameter validation errors name the field; cache hit returns equal arrays and voice.render is called once per key (monkeypatched counter).
+
+- [ ] T-103: Scale source and trigger policy — `S.scale` (modes, octaves, top root, per-scene cursor shared by instance), `AudioConfig` full validation, gain curve, `min_impact_speed`, `min_retrigger_interval`, `max_triggers_per_frame`, polyphony voice stealing with 5 ms fade.
+  - Requirements: FR-103, FR-106, FR-108
+  - Files: src/bouncekit/sound.py, config.py, scene.py, audio/mixer.py, tests/test_scale.py, tests/test_policy.py, tests/test_config.py (new AudioConfig cases only)
+  - Done when: tests pass for — scale note lists (C4 major_pentatonic octaves=1 → C4 D4 E4 G4 A4 C5; each mode's intervals), wrap-around, dropped triggers don't advance the cursor, shared instance shares cursor, fresh scene restarts at 0; gain formula at speeds 0/ref/2·ref; below-threshold speed ignored; retrigger interval per (play, object) with two balls; per-frame cap drops later events in order; polyphony: with max_polyphony=2 three overlapping notes → first note cut with a linear 5 ms fade starting at the third note's offset; every AudioConfig field's bad value raises ConfigError naming it.
+
+- [ ] T-104: Example, README, docs — `examples/bounce_notes.py` (ball in ring, `on_collision("ball", "wall", [A.play(S.scale("C4", voice="pluck"))])`), README quickstart + M1 API overview (sound sources, voices, AudioConfig defaults, render now muxes AAC, no-sound scenes stay video-only, preview is silent), docstrings check, traceability in progress.md; render the example and verify with ffprobe.
+  - Requirements: FR-110, NFR-102, NFR-104, NFR-105
+  - Files: examples/bounce_notes.py, README.md, tests/test_example.py (new tests only), specs/progress.md
+  - Done when: tests pass for — example loads with one ring tagged "wall", one ball tagged "ball", a scale-pluck rule; a 3 s render has an aac 48000 Hz stereo stream and ≥ 1 trigger whose WAV onset lands at its sample offset; README test checks the M1 section mentions `on_collision`, `S.scale`, `A.play`, `AudioConfig`; `uv run bouncekit render examples/bounce_notes.py` succeeds; full suite < 60 s.

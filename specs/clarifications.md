@@ -58,3 +58,23 @@ User decisions:
 - **Implement M1–M4 now without stopping between milestones** (overrides the SRS "stop after each milestone"); M5 (Rube Goldberg) stays out of scope. Use workflows; Sonnet for less complex tasks.
 - `soundfile` and `mido` are in the SRS stack, so adding them in M1/M3 needs no further approval. Any other new runtime dependency still needs the user.
 - For each milestone, genuinely ambiguous decisions are made by the spec author with the recommended default, recorded below as "M<n> assumptions", and reported to the user at the end.
+
+## M1 assumptions
+
+Made by the spec author with the recommended default (user delegated: "handle appropriately"); reported to the user at the end.
+
+- B1. **Event time = end of the substep** in which contact began (`step / (fps·substeps)`); the sound plays up to one frame before the frame that first shows the contact, never after. Reason: exact, integer-derivable and within the SRS's frame-level sync.
+- B2. **One event per object pair per contact**, not per pymunk shape pair: seam double-hits are merged (max speed) and rolling onto the next ring segment does not re-fire. Reason: measured in planning — a seam hit fires two `begin`s in one substep, which would double every note.
+- B3. **Pitch typing**: `str` = note name (A4 = 440 Hz, 12-TET, `#`/`b`), `int` = MIDI 0..127, `float` = Hz. Reason: matches common music-library conventions; `440` (int) is rejected as MIDI out of range, which surfaces the mistake.
+- B4. **Pluck noise seeded from (scene seed, pitch, damping)**, not from the trigger index as first proposed. Reason: per-trigger seeds defeat the note cache; repeated plucks of one pitch sounding identical is acceptable and still deterministic per seed.
+- B5. **Scale includes the top root** (`octaves` octaves of degrees + root `octaves` up) and only ascends, wrapping to the bottom. Reason: ending on the root sounds resolved; up/down patterns can come with M3 melodies.
+- B6. **Scale cursor per `Scale` instance per scene**, advanced only by notes that actually play. Reason: sources stay immutable values; dropped triggers would otherwise skip notes audibly.
+- B7. **Rule matching** is by tags in either order; `a` is the object with `tag_a`. Retrigger interval is keyed by (play action, `a`). Reason: matches the SRS `on_collision("ball", "wall", ...)` reading; per-pair cooldowns are M2.
+- B8. **Gain curve** `gain × min(1, speed / 1500) ** 0.5` with a 40 px/s floor below which nothing plays. Reason: square root keeps soft hits audible; floor removes rolling/resting micro-contacts.
+- B9. **Defaults**: `max_triggers_per_frame=6`, `max_polyphony=24`, `min_retrigger_interval=0.05 s`, `peak_dbfs=-1`. Per-frame overflow keeps the first triggers in event order. Reason: sensible for one-to-hundreds of balls; first-N is simplest deterministic choice.
+- B10. **Polyphony overflow steals the oldest note** (5 ms fade) instead of dropping the new one. Reason: during exponential growth the newest hits must stay audible.
+- B11. **Scenes without sound rules render video-only MP4s** (exactly as M0), no silent track. Reason: no behaviour change for M0 scenes; no needless encode.
+- B12. **Preview stays silent in M1.** Reason: optional per plan; real-time pygame.mixer playback adds sync code with no effect on the offline output (source of truth). Revisit with M3 hot-reload.
+- B13. **Stereo, centred in M1**, 48 kHz fixed (not configurable); WAV written as 32-bit float to a temp dir and deleted after muxing. Reason: SRS fixes 48 kHz; pan is M3; float avoids quantising the deterministic buffer.
+- B14. **Master bus = `tanh` then peak-normalise to -1 dBFS, then a 5 ms fade-out at the end.** Quiet scenes are therefore raised to -1 dBFS too. Reason: simplest limiter that guarantees ≤ 1.0; consistent loudness across videos.
+- B15. **Default voice is `"sine"`.** Reason: neutral, predictable; the example uses `"pluck"`.

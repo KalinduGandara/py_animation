@@ -23,6 +23,8 @@
 
 - 2026-10-24: User review of M0: (a) tunnelling -> `ConfigError` (test scenes given honest `max_speed` values for their slow balls); (b) jagged ring fixed: new `Renderer.arc`, SDF anti-aliasing for circle/thick_line/arc, tests compare every pixel to analytic coverage; (c) added tests for CRF 18/+faststart flags + moov-before-mdat, and preview pacing (ticks at fps, one step per displayed frame even when lagging). ruff/mypy kept.
 
+- 2026-10-24: M1 planned: requirements FR-101..FR-110 / NFR-101..NFR-105, design §M1, tasks T-101..T-104, assumptions B1..B15. Probe: pymunk 7.3.1 `begin` sees pre-impulse velocities; a seam hit fires two `begin`s in one substep (merged per object pair).
+
 ## Traceability (requirement -> tests)
 
 | Req | Tests |
@@ -48,4 +50,4 @@
 
 ## Status
 
-M0 complete and reviewed. Waiting for user review. Next: M1 (audio) planning — not started.
+M0 complete and reviewed. M1 (audio) specified; next: T-101.
