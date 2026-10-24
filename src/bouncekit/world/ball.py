@@ -50,6 +50,8 @@ class Ball:
         self.shape.elasticity = elasticity_value
         self.shape.friction = 0.0
         space.add(self.body, self.shape)
+        self.alive: bool = True
+        """``False`` once the ball has been destroyed (removed from its scene)."""
 
     def clamp_speed(self, max_speed: float) -> None:
         """Scale the velocity down to ``max_speed`` if it is faster, keeping direction."""

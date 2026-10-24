@@ -1,4 +1,4 @@
-"""Collision event log (FR-101).
+"""Event model (FR-201) and collision event log (FR-101).
 
 One wildcard pymunk handler records, per pair of world objects, the moment they
 start touching. Callbacks only read the arbiter and append to Python containers;
@@ -18,27 +18,40 @@ from bouncekit.world.circle import CircleBoundary
 WorldObject = CircleBoundary | Ball
 
 
+EventKind = Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
+
+
 @dataclass(frozen=True)
-class CollisionEvent:
-    """Two world objects started touching.
+class Event:
+    """Something happened in the simulation (FR-201); immutable.
 
     Attributes:
-        kind: always ``"collision"``.
-        step: 1-based global physics step at whose end contact had begun.
+        kind: ``"collision"``, ``"escape"``, ``"spawn"``, ``"destroy"``, ``"timer"`` or
+            ``"condition"``.
+        step: 1-based global physics step in which the event happened (for a
+            collision: at whose end contact had begun).
         frame: video frame being simulated (frame index before it advanced).
         time: ``step / (fps * substeps)`` seconds.
-        objects: the two objects, in pymunk shape order.
-        speed: px/s, relative velocity along the contact normal before the impact.
-        position: contact point in screen pixels.
+        objects: collision: the two objects, in pymunk shape order; escape:
+            ``(ring, ball)``; spawn/destroy: ``(obj,)``; timer/condition: ``()``.
+        speed: px/s. Collision: relative velocity along the contact normal before
+            the impact; escape/spawn/destroy: the ball's speed (0.0 for a ring);
+            timer/condition: ``None``.
+        position: contact point or object centre in screen pixels; ``None`` for
+            timer/condition events.
     """
 
-    kind: Literal["collision"]
+    kind: EventKind
     step: int
     frame: int
     time: float
-    objects: tuple[WorldObject, WorldObject]
-    speed: float
-    position: Vec
+    objects: tuple[WorldObject, ...]
+    speed: float | None
+    position: Vec | None
+
+
+CollisionEvent = Event
+"""M1 name of :class:`Event`, kept so ``CollisionEvent(kind="collision", ...)`` works."""
 
 
 class EventRecorder:
@@ -97,7 +110,7 @@ class EventRecorder:
         rel = body_a.velocity_at_world_point(point) - body_b.velocity_at_world_point(point)
         speed = abs(rel.dot(arb.normal))
         if pending is not None:
-            if speed > pending.speed:
+            if pending.speed is None or speed > pending.speed:
                 self._pending[key] = CollisionEvent(
                     "collision", pending.step, pending.frame, pending.time,
                     pending.objects, speed, (point.x, point.y),

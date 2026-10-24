@@ -116,7 +116,8 @@ class SceneConfig:
     """Immutable, validated scene settings (pixels, origin top-left, +y down).
 
     ``background`` accepts a colour string or tuple and is stored as an RGB tuple.
-    ``audio`` holds the sound settings (:class:`AudioConfig`).
+    ``audio`` holds the sound settings (:class:`AudioConfig`). ``rule_cooldown`` is
+    the default per-pair cooldown of collision rules in seconds (FR-204).
     """
 
     width: int = 1080
@@ -129,6 +130,7 @@ class SceneConfig:
     substeps: int = 8
     max_speed: float = 4000.0
     audio: AudioConfig = field(default_factory=AudioConfig)
+    rule_cooldown: float = 0.05
 
     def __post_init__(self) -> None:
         if not isinstance(self.audio, AudioConfig):
@@ -152,3 +154,6 @@ class SceneConfig:
         object.__setattr__(self, "max_speed", max_speed)
         object.__setattr__(self, "background", background)
         object.__setattr__(self, "gravity", gravity)
+        object.__setattr__(
+            self, "rule_cooldown", _non_negative_number("rule_cooldown", self.rule_cooldown)
+        )

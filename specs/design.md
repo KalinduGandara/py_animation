@@ -563,6 +563,16 @@ class Rule:
 - `when`: after the frame, for rules with `fired == False` in registration order: if `predicate(scene)`: set fired, log `Event("condition", step=last step of the frame, ...)`, dispatch that rule only, apply commands.
 - Handler call: for an `Action`, `handler.run(ctx)`; for a callable, the per-kind signature (FR-202). A fresh `ActionContext` per (event, rule).
 
+### M2.4a Implementation notes (T-201)
+
+- Staged within M2: after T-201 `RuleKind` is `"collision" | "destroy"`, `Rule` has only the fields those kinds use (`kind, handlers, index, tag_a, tag_b, cooldown, object_cooldown`), the command queue holds only `DestroyCmd`, and `SceneConfig` gains only `rule_cooldown` (`max_balls` comes with T-202). Escape/timer/spawn/condition kinds, `ctx.split`/`spawn`/... are added by their tasks.
+- `Scene._rules` is kept as a read-only M1 view, `[(tag_a, tag_b, handlers)]` of the collision rules, because an M1 test indexes it (NFR-204). Rules live in `scene._engine.rules`.
+- `ctx.play(source, gain=)` validates through `A.play` and then shares one `Play` per equal `(source, gain)` (engine lookup dict), so the retrigger key `(play, a)` of FR-211 is stable across calls; a fresh `Play` per call would never retrigger-limit callback sounds.
+- The registration helper is shared, so `on_destroy` already accepts the decorator form (T-203 adds the remaining methods and their tests).
+- A destroyed ring's destroy event has `speed=0.0` and `position=ring.center`. `space.remove` runs the recorder's `separate` synchronously (verified in pymunk 7.3.1), so contact counts drop at once; the removed shapes are then dropped from `EventRecorder.owners`.
+- `step_frame` skips dispatch when there are no rules or no pending events and skips command application when the queue is empty (same behaviour, less per-step work). Commands queued outside dispatch (e.g. a test calling `ctx.destroy`) are applied by the next `_apply_commands`.
+- `render`: rule-less scenes encode straight to `out` (M0 path); with rules, the video goes to the temp dir and is muxed iff `has_sound or triggers`, else moved to `out` with `Path.replace`.
+
 ### M2.5 Commands (FR-205..FR-210)
 
 `apply(scene, cmd)` in `rules/commands.py`; every function first checks `target.alive` and the target type (no-op otherwise).

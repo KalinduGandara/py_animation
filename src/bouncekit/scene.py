@@ -1,16 +1,18 @@
 """Scene: configuration, seeded RNG, object registry, fixed-step loop and frames."""
 
+import math
 import random
 import sys
 import tempfile
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
+from typing import TypeVar, overload
 
 import numpy as np
 import pymunk
 from numpy.typing import NDArray
 
-from bouncekit.actions import Play
+from bouncekit.actions import ACTION_TYPES, Handler, Play
 from bouncekit.audio.mixer import (
     NoteTrigger,
     limit_true_peak,
@@ -19,13 +21,15 @@ from bouncekit.audio.mixer import (
     sample_offset,
 )
 from bouncekit.colors import ColorLike
-from bouncekit.config import AudioConfig, SceneConfig, Vec
+from bouncekit.config import AudioConfig, SceneConfig, Vec, _non_negative_number
 from bouncekit.errors import ConfigError
-from bouncekit.events import CollisionEvent, EventRecorder, WorldObject
+from bouncekit.events import Event, EventRecorder, WorldObject
 from bouncekit.export.audio import write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
+from bouncekit.rules.commands import Command, apply
+from bouncekit.rules.engine import METHOD, SUBJECTS, Rule, RuleEngine, RuleKind
 from bouncekit.sound import Scale
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -35,6 +39,8 @@ __all__ = ["Scene", "WorldObject"]
 # Overrides (``seed``, ``duration``) set by the CLI while it executes a scene script.
 # ``Scene.__init__`` applies them before creating ``rng``.
 _overrides: dict[str, object] = {}
+
+F = TypeVar("F", bound=Callable[..., object])
 
 
 class Scene:
@@ -58,10 +64,12 @@ class Scene:
         substeps: int = 8,
         max_speed: float = 4000.0,
         audio: AudioConfig | None = None,
+        rule_cooldown: float = 0.05,
     ) -> None:
         """Validate the settings and create an empty world.
 
-        ``audio`` defaults to ``AudioConfig()``.
+        ``audio`` defaults to ``AudioConfig()``. ``rule_cooldown`` is the default
+        per-pair cooldown of collision rules in seconds (see :meth:`on_collision`).
 
         Raises:
             ConfigError: if any setting is invalid.
@@ -77,6 +85,7 @@ class Scene:
             "substeps": substeps,
             "max_speed": max_speed,
             "audio": AudioConfig() if audio is None else audio,
+            "rule_cooldown": rule_cooldown,
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
@@ -87,18 +96,25 @@ class Scene:
         self.space.gravity = self.config.gravity
         self.space.iterations = 10
         self.space.damping = 1.0
-        self._dt = 1.0 / (self.config.fps * self.config.substeps)
-        self._objects: list[WorldObject] = []
+        self._rate = self.config.fps * self.config.substeps
+        self._dt = 1.0 / self._rate
+        self._objects: list[WorldObject] = []  # live objects, insertion order
         self._balls: list[Ball] = []
         self._rings: list[CircleBoundary] = []
+        # Monotonic object indices (never reused); lookup only, keys hash by identity.
+        self._indices: dict[WorldObject, int] = {}
+        self._next_index = 0
         self._step = 0
-        self._events: list[CollisionEvent] = []
-        self._rules: list[tuple[str, str, tuple[Play, ...]]] = []
+        self._events: list[Event] = []
+        self._engine = RuleEngine(self)
+        self._queue: list[Command] = []  # FIFO, applied after each step's dispatch
+        self._cascade: list[Event] = []  # spawn/destroy events for the next step
         self._triggers: list[NoteTrigger] = []
         # Lookup-only state for the trigger policy (FR-103, FR-106); keys hash by identity.
         self._cursor: dict[Scale, int] = {}
-        self._last_trigger: dict[tuple[Play, WorldObject], int] = {}  # -> step
-        self._recorder = EventRecorder(self.config.fps * self.config.substeps)
+        self._last_trigger: dict[tuple[Play, WorldObject | None], int] = {}  # -> step
+        self._frame_triggers: dict[int, int] = {}  # event.frame -> notes started
+        self._recorder = EventRecorder(self._rate)
         self._recorder.install(self.space)
 
     @property
@@ -108,12 +124,18 @@ class Scene:
 
     @property
     def objects(self) -> tuple[WorldObject, ...]:
-        """All world objects in insertion order."""
+        """Live world objects in insertion order (destroyed objects are removed)."""
         return tuple(self._objects)
 
+    def count(self, tag: str | None = None) -> int:
+        """Number of live objects carrying ``tag`` (all live objects for ``None``)."""
+        if tag is None:
+            return len(self._objects)
+        return sum(1 for obj in self._objects if tag in obj.tags)
+
     @property
-    def events(self) -> tuple[CollisionEvent, ...]:
-        """Collision events recorded so far, in recording order."""
+    def events(self) -> tuple[Event, ...]:
+        """Events recorded so far (collisions, destroys, ...), in log order."""
         return tuple(self._events)
 
     @property
@@ -123,81 +145,234 @@ class Scene:
 
     @property
     def has_sound(self) -> bool:
-        """Whether any rule plays sound (then ``render`` muxes an audio track)."""
-        return any(actions for _, _, actions in self._rules)
+        """Whether any rule has an ``A.play`` handler.
 
-    def on_collision(self, tag_a: str, tag_b: str, actions: Sequence[Play]) -> None:
-        """When objects tagged ``tag_a`` and ``tag_b`` start touching, run ``actions``.
+        ``render`` muxes an audio track when this is true or any note was triggered
+        (e.g. by ``ctx.play`` in a callback).
+        """
+        return self._engine.has_play
 
-        Tags match in either order. In this version every action must be an
-        ``A.play(...)``. Rules run after each frame's physics, in registration order.
+    @property
+    def _rules(self) -> list[tuple[str, str, tuple[Handler, ...]]]:
+        """M1 view of the collision rules as ``(tag_a, tag_b, handlers)`` tuples."""
+        return [
+            (r.tag_a, r.tag_b or "", r.handlers)
+            for r in self._engine.rules
+            if r.kind == "collision"
+        ]
+
+    @overload
+    def on_collision(
+        self,
+        tag_a: str,
+        tag_b: str,
+        handlers: None = None,
+        *,
+        cooldown: float | None = None,
+        object_cooldown: float = 0.0,
+    ) -> Callable[[F], F]: ...
+
+    @overload
+    def on_collision(
+        self,
+        tag_a: str,
+        tag_b: str,
+        handlers: Sequence[Handler],
+        *,
+        cooldown: float | None = None,
+        object_cooldown: float = 0.0,
+    ) -> None: ...
+
+    def on_collision(
+        self,
+        tag_a: str,
+        tag_b: str,
+        handlers: Sequence[Handler] | None = None,
+        *,
+        cooldown: float | None = None,
+        object_cooldown: float = 0.0,
+    ) -> Callable[[F], F] | None:
+        """When objects tagged ``tag_a`` and ``tag_b`` start touching, run ``handlers``.
+
+        Tags match in either order; subject ``a`` is the object carrying ``tag_a``.
+        ``handlers`` is a list of built-in actions (``A.play``, ``A.destroy``) and
+        callables ``f(ctx, a, b, event)``, run in order after the physics step,
+        never inside it. Without ``handlers``, returns a decorator that registers
+        the decorated function and returns it unchanged.
+
+        Non-play handlers are skipped for a pair that fired this rule less than
+        ``cooldown`` seconds earlier (default ``config.rule_cooldown``) and, when
+        ``object_cooldown > 0``, for an ``a`` that fired it with any partner less than
+        ``object_cooldown`` earlier. ``A.play`` keeps the audio trigger policy only.
 
         Raises:
-            ConfigError: for an empty or non-string tag, or ``actions`` that is not a
-                list/tuple of play actions.
+            ConfigError: for an empty or non-string tag, bad handlers, a negative or
+                non-finite cooldown, or an action targeting a missing subject.
         """
         for name, tag in (("tag_a", tag_a), ("tag_b", tag_b)):
-            if not isinstance(tag, str) or not tag:
-                raise ConfigError(f"{name} must be a non-empty string; got {tag!r}")
-        if not isinstance(actions, list | tuple) or not all(
-            isinstance(act, Play) for act in actions
+            _check_tag(name, tag)
+        pair = (
+            self.config.rule_cooldown
+            if cooldown is None
+            else _non_negative_number("cooldown", cooldown)
+        )
+        per_object = _non_negative_number("object_cooldown", object_cooldown)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("collision", items, len(self._engine.rules), tag_a, tag_b, pair, per_object)
+
+        return self._register("collision", handlers, make)
+
+    @overload
+    def on_destroy(self, tag: str, handlers: None = None) -> Callable[[F], F]: ...
+
+    @overload
+    def on_destroy(self, tag: str, handlers: Sequence[Handler]) -> None: ...
+
+    def on_destroy(
+        self, tag: str, handlers: Sequence[Handler] | None = None
+    ) -> Callable[[F], F] | None:
+        """When an object carrying ``tag`` is destroyed, run ``handlers``.
+
+        Callables are called as ``f(ctx, obj, event)``; subject ``a`` is the destroyed
+        object (there is no ``b``). The destroy event is dispatched at the step after
+        the one that destroyed the object. Without ``handlers``, returns a decorator.
+
+        Raises:
+            ConfigError: for an empty or non-string tag, bad handlers, or an action
+                targeting subject ``"b"``.
+        """
+        _check_tag("tag", tag)
+
+        def make(items: tuple[Handler, ...]) -> Rule:
+            return Rule("destroy", items, len(self._engine.rules), tag)
+
+        return self._register("destroy", handlers, make)
+
+    def _register(
+        self,
+        kind: RuleKind,
+        handlers: Sequence[Handler] | None,
+        make: Callable[[tuple[Handler, ...]], Rule],
+    ) -> Callable[[F], F] | None:
+        if handlers is None:
+
+            def decorator(fn: F) -> F:
+                if not callable(fn) or isinstance(fn, ACTION_TYPES):
+                    raise ConfigError(f"handler must be a callable; got {fn!r}")
+                self._engine.add(make((fn,)))
+                return fn
+
+            return decorator
+        if not isinstance(handlers, list | tuple) or not all(
+            isinstance(h, ACTION_TYPES) or callable(h) for h in handlers
         ):
             raise ConfigError(
-                f"actions must be a list of actions such as A.play(...); got {actions!r}"
+                "handlers must be a list of actions such as A.play(...) or callables; "
+                f"got {handlers!r}"
             )
-        self._rules.append((tag_a, tag_b, tuple(actions)))
+        for h in handlers:
+            target = getattr(h, "target", None)
+            if isinstance(target, str) and target not in SUBJECTS[kind]:
+                raise ConfigError(
+                    f"{h!r} targets subject {target!r}, which an {METHOD[kind]} rule does not have"
+                )
+        self._engine.add(make(tuple(handlers)))
+        return None
 
-    def _dispatch(self, events: Sequence[CollisionEvent]) -> None:
-        """Turn one frame's events into note triggers (outside collision callbacks).
+    def _dispatch(self, events: Sequence[Event]) -> None:
+        """Run the rules for ``events`` (outside collision callbacks).
 
-        Applies the trigger policy (FR-106): impacts slower than
-        ``min_impact_speed`` are ignored; one play action re-triggers for the same
-        object ``a`` only after ``min_retrigger_interval``; at most
-        ``max_triggers_per_frame`` notes start in this frame (later ones dropped in
-        event order). Only notes that play advance a ``Scale``'s cursor (FR-103).
+        Built-in actions and callbacks only queue world changes (applied by
+        ``_apply_commands``); play handlers trigger notes at once via ``_trigger``.
+        """
+        self._engine.dispatch(tuple(events))
+
+    def _trigger(self, play: Play, ev: Event, a: WorldObject | None) -> None:
+        """Start a note for ``play`` on ``ev`` if the trigger policy allows (FR-106, FR-211).
+
+        Impacts slower than ``min_impact_speed`` are ignored (events without a speed
+        are exempt and play at ``play.gain``); one play action re-triggers for the
+        same subject ``a`` only after ``min_retrigger_interval``; at most
+        ``max_triggers_per_frame`` notes start per ``ev.frame`` (later ones dropped in
+        dispatch order). Only notes that play advance a ``Scale``'s cursor (FR-103).
         """
         cfg = self.config
         audio = cfg.audio
-        rate = cfg.fps * cfg.substeps
-        started = 0
-        for ev in events:
-            first, second = ev.objects
-            for tag_a, tag_b, actions in self._rules:
-                if tag_a in first.tags and tag_b in second.tags:
-                    a = first
-                elif tag_a in second.tags and tag_b in first.tags:
-                    a = second
-                else:
-                    continue
-                for act in actions:
-                    if ev.speed < audio.min_impact_speed:
-                        continue
-                    last = self._last_trigger.get((act, a))
-                    # One correctly rounded division of the exact step gap: a gap of
-                    # exactly the interval is never misjudged as shorter.
-                    if last is not None and (ev.step - last) / rate < audio.min_retrigger_interval:
-                        continue
-                    if started >= audio.max_triggers_per_frame:
-                        continue
-                    src = act.source
-                    if isinstance(src, Scale):
-                        index = self._cursor.get(src, 0)
-                        hz = src.hz[index]
-                        self._cursor[src] = (index + 1) % len(src.hz)
-                    else:
-                        hz = src.hz
-                    gain = act.gain * min(1.0, ev.speed / audio.reference_speed) ** 0.5
-                    self._triggers.append(
-                        NoteTrigger(
-                            step=ev.step,
-                            offset=sample_offset(ev.step, cfg.fps, cfg.substeps),
-                            voice=src.voice,
-                            hz=hz,
-                            gain=gain,
-                        )
-                    )
-                    self._last_trigger[(act, a)] = ev.step
-                    started += 1
+        speed = ev.speed
+        if speed is not None and speed < audio.min_impact_speed:
+            return
+        last = self._last_trigger.get((play, a))
+        # One correctly rounded division of the exact step gap: a gap of exactly the
+        # interval is never misjudged as shorter.
+        if last is not None and (ev.step - last) / self._rate < audio.min_retrigger_interval:
+            return
+        started = self._frame_triggers.get(ev.frame)
+        if started is None:
+            for old in [f for f in self._frame_triggers if f < ev.frame]:
+                del self._frame_triggers[old]
+            started = 0
+        if started >= audio.max_triggers_per_frame:
+            return
+        src = play.source
+        if isinstance(src, Scale):
+            index = self._cursor.get(src, 0)
+            hz = src.hz[index]
+            self._cursor[src] = (index + 1) % len(src.hz)
+        else:
+            hz = src.hz
+        gain = play.gain
+        if speed is not None:
+            gain *= min(1.0, speed / audio.reference_speed) ** 0.5
+        self._triggers.append(
+            NoteTrigger(
+                step=ev.step,
+                offset=sample_offset(ev.step, cfg.fps, cfg.substeps),
+                voice=src.voice,
+                hz=hz,
+                gain=gain,
+            )
+        )
+        self._last_trigger[(play, a)] = ev.step
+        self._frame_triggers[ev.frame] = started + 1
+
+    def _apply_commands(self) -> None:
+        """Apply the queued commands in FIFO order and empty the queue."""
+        queue, self._queue = self._queue, []
+        for cmd in queue:
+            apply(self, cmd)
+
+    def _register_object(self, obj: WorldObject, shapes: Iterable[pymunk.Shape]) -> None:
+        index = self._next_index
+        self._next_index += 1
+        self._indices[obj] = index
+        self._recorder.register(index, obj, shapes)
+        self._objects.append(obj)
+
+    def _remove(self, obj: WorldObject) -> None:
+        """Destroy a live ``obj`` now and log its destroy event (for the next step)."""
+        shapes: list[pymunk.Shape]
+        if isinstance(obj, Ball):
+            shapes = [obj.shape]
+            speed = math.hypot(*obj.velocity)
+            position = obj.position
+            self._balls.remove(obj)
+        else:
+            shapes = list(obj.shapes)
+            speed = 0.0
+            position = obj.center
+            self._rings.remove(obj)
+        # Removing runs the recorder's ``separate`` for current contacts right here.
+        self.space.remove(obj.body, *shapes)
+        for shape in shapes:
+            self._recorder.owners.pop(shape, None)
+        self._objects.remove(obj)
+        obj.alive = False
+        ev = Event(
+            "destroy", self._step, self.frame, self._step / self._rate, (obj,), speed, position
+        )
+        self._events.append(ev)
+        self._cascade.append(ev)
 
     def audio_buffer(self) -> NDArray[np.float32]:
         """Mix the notes triggered so far: float32, shape ``(n, 2)``, 48 kHz.
@@ -247,8 +422,7 @@ class Scene:
         )
         for ball in self._balls:
             self._check_tunnelling(ball, ring)
-        self._recorder.register(len(self._objects), ring, ring.shapes)
-        self._objects.append(ring)
+        self._register_object(ring, ring.shapes)
         self._rings.append(ring)
         return ring
 
@@ -279,8 +453,7 @@ class Scene:
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
-        self._recorder.register(len(self._objects), ball, [ball.shape])
-        self._objects.append(ball)
+        self._register_object(ball, [ball.shape])
         self._balls.append(ball)
         return ball
 
@@ -301,26 +474,35 @@ class Scene:
             )
 
     def step_frame(self) -> None:
-        """Advance the simulation by one frame (``substeps`` fixed physics steps)."""
+        """Advance the simulation by one frame (``substeps`` fixed physics steps).
+
+        After each step: collect its collision events, clamp speeds, dispatch the
+        previous step's spawn/destroy events and then this step's events to the
+        rules, and apply the queued commands (FR-203).
+        """
         max_speed = self.config.max_speed
         rec = self._recorder
         rec.frame = self.frame
-        first_event = len(self._events)
         for _ in range(self.config.substeps):
             self._step += 1
             rec.step = self._step
             self.space.step(self._dt)
-            self._events.extend(rec.flush())
+            events = rec.flush()
+            self._events.extend(events)
             # Clamp after the whole step: collision impulses land after velocity
             # integration, so a clamp inside velocity_func would miss them.
             for ball in self._balls:
                 ball.clamp_speed(max_speed)
+            pending = self._cascade + events
+            self._cascade = []
+            if self._engine.rules and pending:
+                self._dispatch(pending)
+            if self._queue:
+                self._apply_commands()
         self.frame += 1
-        if self._rules:
-            self._dispatch(self._events[first_event:])
 
     def draw(self, renderer: Renderer) -> None:
-        """Draw the background and every object, in insertion order.
+        """Draw the background and every live object, in insertion order.
 
         Drawing only reads world state; it never changes the simulation.
         """
@@ -344,10 +526,10 @@ class Scene:
     def render(self, out: str | Path) -> Path:
         """Simulate and encode the whole scene to an H.264 MP4 at ``out``.
 
-        Parent directories are created. ffmpeg is checked before simulating. If the
-        scene has sound rules, the mix is limited to a true peak of
-        ``audio.peak_dbfs`` and muxed in as 48 kHz stereo AAC; otherwise the MP4 has
-        no audio stream.
+        Parent directories are created. ffmpeg is checked before simulating. If
+        any rule has an ``A.play`` or any note was triggered, the mix is limited to a
+        true peak of ``audio.peak_dbfs`` and muxed in as 48 kHz stereo AAC; otherwise
+        the MP4 has no audio stream.
 
         Raises:
             FfmpegError: if ffmpeg is missing or fails.
@@ -356,7 +538,7 @@ class Scene:
         path = Path(out)
         path.parent.mkdir(parents=True, exist_ok=True)
         cfg = self.config
-        if not self.has_sound:
+        if not self._engine.rules:
             with FfmpegWriter(path, cfg.width, cfg.height, cfg.fps) as writer:
                 for frame in self.frames():
                     writer.write(frame)
@@ -366,6 +548,9 @@ class Scene:
             with FfmpegWriter(video, cfg.width, cfg.height, cfg.fps) as writer:
                 for frame in self.frames():
                     writer.write(frame)
+            if not (self.has_sound or self._triggers):
+                video.replace(path)
+                return path
             # mix() normalises the sample peak; AAC needs true-peak headroom too.
             write_wav(wav, limit_true_peak(self.audio_buffer(), peak_dbfs=cfg.audio.peak_dbfs))
             mux(video, wav, path)
@@ -405,3 +590,8 @@ class Scene:
         from bouncekit import cli  # local import: cli imports this module
 
         raise SystemExit(cli.main(sys.argv[1:], default_scene=Path(sys.argv[0])))
+
+
+def _check_tag(name: str, tag: object) -> None:
+    if not isinstance(tag, str) or not tag:
+        raise ConfigError(f"{name} must be a non-empty string; got {tag!r}")

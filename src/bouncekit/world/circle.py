@@ -67,6 +67,8 @@ class CircleBoundary:
         self._segment_count = segments
         self.shapes: list[pymunk.Segment] = self._build_segments(segments, elasticity_value)
         space.add(self.body, *self.shapes)
+        self.alive: bool = True
+        """``False`` once the ring has been destroyed (removed from its scene)."""
 
     def _build_segments(self, n: int, elasticity: float) -> list[pymunk.Segment]:
         angles = [2 * math.pi * k / n for k in range(n)]
