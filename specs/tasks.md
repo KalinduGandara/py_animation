@@ -17,7 +17,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: scene.py, world/ball.py, world/circle.py, tests/test_world.py, tests/test_config.py
   - Done when: tests for gravity direction, closed ring containment, gap escape, rotation angle after N frames, step/frame counting, speed clamp, no tunnelling at max_speed, seam smoothness, add_* validation all pass.
 
-- [ ] T-004: Renderer protocol, PygameRenderer, `Scene.draw` / `Scene.frames`, determinism tests.
+- [x] T-004: Renderer protocol, PygameRenderer, `Scene.draw` / `Scene.frames`, determinism tests.
   - Requirements: FR-008, NFR-001, NFR-004
   - Files: render/base.py, render/pygame_renderer.py, scene.py, world/*.py (draw), tests/test_render.py, tests/test_determinism.py
   - Done when: frame size/pixel colour tests, render-doesn't-mutate-physics test, same-seed identical hashes, different-seed differing hashes all pass.

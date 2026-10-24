@@ -15,6 +15,7 @@ from bouncekit.config import (
     _vec,
 )
 from bouncekit.errors import ConfigError
+from bouncekit.render.base import Renderer
 
 
 class CircleBoundary:
@@ -124,3 +125,10 @@ class CircleBoundary:
     def tags(self) -> frozenset[str]:
         """Tags given at creation."""
         return self._tags
+
+    def draw(self, renderer: Renderer) -> None:
+        """Draw each present segment at the current rotation (reads state only)."""
+        for seg in self.shapes:
+            a = self.body.local_to_world(seg.a)
+            b = self.body.local_to_world(seg.b)
+            renderer.thick_line((a.x, a.y), (b.x, b.y), self._thickness, self._color)

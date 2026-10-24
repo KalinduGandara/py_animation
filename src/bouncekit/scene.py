@@ -1,12 +1,14 @@
-"""Scene: configuration, seeded RNG, object registry and fixed-step loop."""
+"""Scene: configuration, seeded RNG, object registry, fixed-step loop and frames."""
 
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 
 import pymunk
 
 from bouncekit.colors import ColorLike
 from bouncekit.config import SceneConfig, Vec
+from bouncekit.render.base import Renderer
+from bouncekit.render.pygame_renderer import PygameRenderer
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -144,3 +146,25 @@ class Scene:
         for _ in range(self.config.substeps):
             self.space.step(self._dt)
         self.frame += 1
+
+    def draw(self, renderer: Renderer) -> None:
+        """Draw the background and every object, in insertion order.
+
+        Drawing only reads world state; it never changes the simulation.
+        """
+        renderer.clear(self.config.background)
+        for obj in self._objects:
+            obj.draw(renderer)
+
+    def frames(self) -> Iterator[bytes]:
+        """Yield each remaining frame as RGB24 bytes, then advance one frame.
+
+        The first frame yielded shows the current state (frame 0 for a new scene);
+        frames are produced until ``frame`` reaches ``total_frames``. Nothing is
+        reset, so a scene is meant to be simulated once.
+        """
+        renderer = PygameRenderer(self.config.width, self.config.height)
+        while self.frame < self.total_frames:
+            self.draw(renderer)
+            yield renderer.to_rgb_bytes()
+            self.step_frame()

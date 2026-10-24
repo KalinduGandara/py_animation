@@ -7,6 +7,7 @@ import pymunk
 
 from bouncekit.colors import Color, ColorLike, parse_color
 from bouncekit.config import Vec, _non_negative_number, _positive_number, _tags, _vec
+from bouncekit.render.base import Renderer
 
 
 class Ball:
@@ -96,3 +97,7 @@ class Ball:
     def tags(self) -> frozenset[str]:
         """Tags given at creation."""
         return self._tags
+
+    def draw(self, renderer: Renderer) -> None:
+        """Draw the ball as a filled circle (reads state only)."""
+        renderer.circle(self.position, self._radius, self._color)

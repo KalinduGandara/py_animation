@@ -7,7 +7,8 @@
 - 2026-10-24: T-001 done: pyproject tool config + entry point, package skeleton (world/render/export, cli stub), smoke tests; pytest/ruff/mypy pass.
 - 2026-10-24: T-002 done: errors, colour parsing, frozen validated SceneConfig; tests/test_config.py; gate passes.
 - 2026-10-24: T-003 done: Scene core (config, rng, `_overrides`, registry, fixed-step loop), Ball (speed clamp in velocity_func), CircleBoundary (segments, gap, rotation, set_neighbors); shared validators in config.py; tests/test_world.py + add_* validation; gate passes. Note: Chipmunk adds ~0.2% speed on head-on vertex hits (bounded by the clamp); neighbour-joined seams cut wall hops from ~10 px to ~2 px.
+- 2026-10-24: T-004 done: Renderer protocol (runtime_checkable), PygameRenderer (off-screen Surface; thick_line = filled quad + AA edges + round caps), Ball/CircleBoundary.draw, Scene.draw/frames (yield current frame then step); tests/test_render.py + tests/test_determinism.py; gate passes.
 
 ## Status
 
-In progress: M0. Next: T-004.
+In progress: M0. Next: T-005.
