@@ -116,7 +116,7 @@ Built-in actions (`from bouncekit import actions as A`; `target="a"` by default,
 | `A.play(source, gain=1.0)` | play a note |
 | `A.destroy(target=)` | remove a ball or ring |
 | `A.split(into=2, spread_degrees=30, radius_scale=1, max_total=None)` | split a ball into several |
-| `A.spawn(pos=, radius=, velocity=, count=1, color=, tags=, constant_speed=, max_total=)` | add balls; `pos`/`velocity`/`color` may be `f(ctx)` |
+| `A.spawn(pos=, radius=, velocity=, count=1, color=, tags=, constant_speed=, max_total=, trail=False, glow=0)` | add balls; `pos`/`velocity`/`color` may be `f(ctx)` |
 | `A.recolor(color)`, `A.resize(...)`, `A.set_velocity(...)`, `A.flash(...)` | change look or motion |
 | `A.end_after(seconds)` | end the video that long after the current frame |
 
@@ -161,11 +161,12 @@ scene.on_collision("ball", "wall", [A.play(tune, pan=0.8), A.particles(count=14)
 - `EffectsConfig(trail_seconds=0.3, glow_blur=18.0, max_particles=2000)`: pass as
   `Scene(effects=EffectsConfig(...))`.
 - `add_ball(..., trail=True, glow=1.0)` leaves a fading trail and a blurred light (glow 0..4);
-  `add_circle(..., glow=)` lights the ring. Split and spawned balls inherit both.
+  `add_circle(..., glow=)` lights the ring. Split children inherit both; spawned balls have no
+  parent, so pass `trail=`/`glow=` to `A.spawn` / `ctx.spawn` explicitly.
 - `A.particles(count=12, speed=400, lifetime=0.5, size=3, color=None, drag=2, pos=None)` bursts
   impact particles at the contact point; `ctx.particles(...)` does the same from a callback.
 - Colour modes (`from bouncekit import colors as C`): `C.fixed(c)`, `C.hue_cycle(start=, step=)`
-  (next hue per new ball), `C.by_speed(slow=, fast=)`, `C.by_generation(...)`; rings take plain colours.
+  (next hue per new ball; `start`/`step` in degrees), `C.by_speed(slow=, fast=)`, `C.by_generation(...)`; rings take plain colours.
 - `S.melody(path, voice=, track=None, transpose=0)` plays a MIDI file one chord per hit
   and wraps; the hits set the rhythm. `S.sample(path, root="C4", duration=None)` is a voice
   that pitch-shifts an audio file; use it as `voice=` of `S.note`, `S.scale` or `S.melody`.

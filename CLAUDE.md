@@ -13,6 +13,7 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Render: `uv run bouncekit render examples/single_ball.py [--seed N] [--duration S] [--out PATH]`
 - Preview: `uv run bouncekit preview examples/single_ball.py` (silent; audio is offline only)
 - Render with sound (M1): `uv run bouncekit render examples/bounce_notes.py`
+- Make a video from a plain-language prompt: use the `bouncekit-video` skill (`.claude/skills/bouncekit-video/`); scenes go in `scenes/`.
 - Rules examples (M2): `uv run bouncekit render examples/split_on_wall.py` (also `escape_rotating_gap.py`, `destroy_on_contact.py`)
 - Melody + effects (M3): `uv run bouncekit render examples/midi_melody.py`; preview hot-reloads the scene file on save
 - Regenerate assets (M3): `uv run python scripts/make_assets.py` (writes `assets/midi/`, `assets/samples/`; output must stay byte-identical)

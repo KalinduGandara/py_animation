@@ -8,3 +8,4 @@ out/
 *.mp4
 *.wav
 !assets/samples/*.wav
+.DS_Store
