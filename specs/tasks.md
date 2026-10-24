@@ -7,7 +7,7 @@ Each task: tests first → implement → `uv run pytest && uv run ruff check . &
   - Files: pyproject.toml, src/bouncekit/**/__init__.py, tests/test_smoke.py
   - Done when: `uv run pytest`, `uv run ruff check .`, `uv run mypy` all pass.
 
-- [ ] T-002: Errors, colours, SceneConfig with validation.
+- [x] T-002: Errors, colours, SceneConfig with validation.
   - Requirements: FR-001, FR-002
   - Files: errors.py, colors.py, config.py, tests/test_config.py
   - Done when: defaults, every validation error (odd/zero size, fps, duration, substeps, max_speed, bad colours) are tested and pass.
