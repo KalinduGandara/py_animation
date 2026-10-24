@@ -227,7 +227,7 @@ examples/bounce_notes.py                                                        
 ```python
 from bouncekit import Scene, AudioConfig, actions as A, sound as S
 
-scene = Scene(..., audio=AudioConfig(max_polyphony=24))          # audio is optional
+scene = Scene(..., audio=AudioConfig(max_polyphony=24))  # audio is optional
 ring = scene.add_circle(center=(540, 960), radius=450, tags={"wall"})
 scene.add_ball(pos=(540, 700), radius=30, tags={"ball"})
 scene.on_collision("ball", "wall", [A.play(S.scale("C4", voice="pluck"))])
@@ -377,6 +377,8 @@ AAC encoder delay is recorded by ffmpeg as an edit list in MP4, so players align
 - T-102: `Triangle` uses the exact piecewise-linear form `1 − 4·|frac(hz·t + ¼) − ½|` (identical shape to `2/π · arcsin(sin)`, exact 0 at t = 0). `Pluck` treats `y[−1]` as 0 for the first output sample. Pitch tests measure the fundamental by autocorrelation, because a plucked string's loudest partial can be a harmonic.
 - `EventRecorder` stores `owners: dict[Shape, (index, object)]` itself (instead of `Scene._owner`); lookup only, never iterated.
 - Temp dir for muxing is `.bouncekit-*` inside `out.parent`.
+
+- T-103: `scale()` raises `ConfigError` when its top note exceeds 20 kHz (same range rule as `pitch_to_hz`; the spec was silent). `Scale.hz` is `root_hz × 2^(k/12)`. Retrigger check uses the exact step gap, `(step − last_step) / (fps × substeps) < min_retrigger_interval` (one correctly rounded division), instead of subtracting float times, so a gap of exactly the interval plays; `_last_trigger` stores steps. `mix()` stably sorts triggers by `offset` (scene triggers are already in that order) and skips triggers at or past the buffer end before the stealing pass; a stolen note is removed from the sounding list and its fade uses `linspace(1, 0, 240)` like the end fade. AudioConfig validation cases live in tests/test_policy.py (not test_config.py).
 
 ### M1.9 Key decisions and alternatives
 

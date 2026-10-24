@@ -20,6 +20,7 @@ from bouncekit.export.audio import write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.render.base import Renderer
 from bouncekit.render.pygame_renderer import PygameRenderer
+from bouncekit.sound import Scale
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
 
@@ -88,6 +89,9 @@ class Scene:
         self._events: list[CollisionEvent] = []
         self._rules: list[tuple[str, str, tuple[Play, ...]]] = []
         self._triggers: list[NoteTrigger] = []
+        # Lookup-only state for the trigger policy (FR-103, FR-106); keys hash by identity.
+        self._cursor: dict[Scale, int] = {}
+        self._last_trigger: dict[tuple[Play, WorldObject], int] = {}  # -> step
         self._recorder = EventRecorder(self.config.fps * self.config.substeps)
         self._recorder.install(self.space)
 
@@ -138,27 +142,56 @@ class Scene:
         self._rules.append((tag_a, tag_b, tuple(actions)))
 
     def _dispatch(self, events: Sequence[CollisionEvent]) -> None:
-        """Turn this frame's events into note triggers (outside collision callbacks)."""
+        """Turn one frame's events into note triggers (outside collision callbacks).
+
+        Applies the trigger policy (FR-106): impacts slower than
+        ``min_impact_speed`` are ignored; one play action re-triggers for the same
+        object ``a`` only after ``min_retrigger_interval``; at most
+        ``max_triggers_per_frame`` notes start in this frame (later ones dropped in
+        event order). Only notes that play advance a ``Scale``'s cursor (FR-103).
+        """
         cfg = self.config
+        audio = cfg.audio
+        rate = cfg.fps * cfg.substeps
+        started = 0
         for ev in events:
             first, second = ev.objects
             for tag_a, tag_b, actions in self._rules:
-                if not (
-                    (tag_a in first.tags and tag_b in second.tags)
-                    or (tag_a in second.tags and tag_b in first.tags)
-                ):
+                if tag_a in first.tags and tag_b in second.tags:
+                    a = first
+                elif tag_a in second.tags and tag_b in first.tags:
+                    a = second
+                else:
                     continue
                 for act in actions:
+                    if ev.speed < audio.min_impact_speed:
+                        continue
+                    last = self._last_trigger.get((act, a))
+                    # One correctly rounded division of the exact step gap: a gap of
+                    # exactly the interval is never misjudged as shorter.
+                    if last is not None and (ev.step - last) / rate < audio.min_retrigger_interval:
+                        continue
+                    if started >= audio.max_triggers_per_frame:
+                        continue
                     src = act.source
+                    if isinstance(src, Scale):
+                        index = self._cursor.get(src, 0)
+                        hz = src.hz[index]
+                        self._cursor[src] = (index + 1) % len(src.hz)
+                    else:
+                        hz = src.hz
+                    gain = act.gain * min(1.0, ev.speed / audio.reference_speed) ** 0.5
                     self._triggers.append(
                         NoteTrigger(
                             step=ev.step,
                             offset=sample_offset(ev.step, cfg.fps, cfg.substeps),
                             voice=src.voice,
-                            hz=src.hz,
-                            gain=act.gain,
+                            hz=hz,
+                            gain=gain,
                         )
                     )
+                    self._last_trigger[(act, a)] = ev.step
+                    started += 1
 
     def audio_buffer(self) -> NDArray[np.float32]:
         """Mix the notes triggered so far: float32, shape ``(n, 2)``, 48 kHz.

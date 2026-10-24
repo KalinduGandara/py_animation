@@ -73,12 +73,17 @@ def _tags(value: object) -> frozenset[str]:
 class AudioConfig:
     """Sound settings for a scene (sample rate is fixed at 48 000 Hz).
 
+    Raises ``ConfigError`` naming the field for a negative speed or interval, a
+    non-positive reference speed or count, or ``peak_dbfs > 0``.
+
     Attributes:
         min_impact_speed: px/s; slower impacts play nothing.
-        reference_speed: px/s; impact speed that gives full gain.
+        reference_speed: px/s; impact speed that gives full gain. A note's gain is
+            ``play.gain * min(1, speed / reference_speed) ** 0.5``.
         min_retrigger_interval: seconds between notes of one play action for one object.
         max_triggers_per_frame: notes started per video frame, all rules together.
-        max_polyphony: notes sounding at once before the oldest is cut.
+        max_polyphony: notes sounding at once; a new note beyond this cuts the oldest
+            with a 5 ms fade.
         peak_dbfs: peak level of the final mix in dBFS (<= 0).
     """
 
@@ -90,10 +95,20 @@ class AudioConfig:
     peak_dbfs: float = -1.0
 
     def __post_init__(self) -> None:
-        peak = _finite_number("peak_dbfs", self.peak_dbfs)
-        if peak > 0:
+        values = {
+            "min_impact_speed": _non_negative_number("min_impact_speed", self.min_impact_speed),
+            "reference_speed": _positive_number("reference_speed", self.reference_speed),
+            "min_retrigger_interval": _non_negative_number(
+                "min_retrigger_interval", self.min_retrigger_interval
+            ),
+            "peak_dbfs": _finite_number("peak_dbfs", self.peak_dbfs),
+        }
+        _positive_int("max_triggers_per_frame", self.max_triggers_per_frame)
+        _positive_int("max_polyphony", self.max_polyphony)
+        if values["peak_dbfs"] > 0:
             raise ConfigError(f"peak_dbfs must be <= 0; got {self.peak_dbfs!r}")
-        object.__setattr__(self, "peak_dbfs", peak)
+        for name, value in values.items():
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True)

@@ -184,7 +184,8 @@ def test_rule_produces_trigger_per_matching_event() -> None:
         assert trig.step == ev.step
         assert trig.hz == pytest.approx(440.0)
         assert trig.voice == note.voice
-        assert trig.gain == pytest.approx(0.7)
+        # FR-106 (T-103): play.gain scaled by the impact-speed curve.
+        assert trig.gain == pytest.approx(0.7 * min(1.0, ev.speed / 1500.0) ** 0.5)
         assert trig.offset == round(ev.step * 48000 / (FPS * SUBSTEPS))
 
 
