@@ -5,7 +5,14 @@ from collections.abc import Iterable
 
 import pymunk
 
-from bouncekit.colors import Color, ColorLike, parse_color
+from bouncekit.colors import (
+    BySpeed,
+    Color,
+    ColorLike,
+    Dynamic,
+    HueCycle,
+    parse_color,
+)
 from bouncekit.config import (
     Vec,
     _glow,
@@ -74,6 +81,9 @@ class Ball:
         """Whether the ball leaves a fading trail (FR-303); visual only."""
         self.glow: float = glow_value
         """Glow intensity in [0, 4], 0 = no glow (FR-304); visual only."""
+        self._color_mode: Dynamic | None = None
+        self.hue_mode: HueCycle | None = None
+        """The hue cycle this ball was created or recoloured with (FR-306), else ``None``."""
 
     def set_radius(self, radius: float) -> None:
         """Change the radius, keeping density 1 (mass = pi * r^2, moment updated).
@@ -132,12 +142,33 @@ class Ball:
 
     @property
     def color(self) -> Color:
-        """Fill colour as an RGB tuple (settable; accepts any colour value)."""
-        return self._color
+        """Current base colour as an RGB tuple, with a dynamic mode evaluated now (FR-306).
+
+        Settable with any colour value; setting clears ``color_mode`` and ``hue_mode``.
+        """
+        mode = self._color_mode
+        if mode is None:
+            return self._color
+        if isinstance(mode, BySpeed):
+            return mode.color_for(self.velocity)
+        return mode.color_for(self.generation)
 
     @color.setter
     def color(self, value: ColorLike) -> None:
-        self._color = parse_color(value)
+        self._set_color(parse_color(value), None, None)
+
+    @property
+    def color_mode(self) -> Dynamic | None:
+        """The draw-time colour mode (``by_speed``/``by_generation``), or ``None``."""
+        return self._color_mode
+
+    def _set_color(self, color: Color, mode: Dynamic | None, hue_mode: HueCycle | None) -> None:
+        """Set the base colour and modes (the scene resolves hue cycles first)."""
+        self._color_mode = mode
+        self.hue_mode = hue_mode
+        self._color = color
+        if mode is not None:
+            self._color = self.color
 
     @property
     def tags(self) -> frozenset[str]:
@@ -146,4 +177,4 @@ class Ball:
 
     def draw(self, renderer: Renderer, color: Color | None = None) -> None:
         """Draw the ball as a filled circle in ``color`` (default: its colour); reads state only."""
-        renderer.circle(self.position, self._radius, self._color if color is None else color)
+        renderer.circle(self.position, self._radius, self.color if color is None else color)

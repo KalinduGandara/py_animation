@@ -5,7 +5,7 @@ from collections.abc import Iterable
 
 import pymunk
 
-from bouncekit.colors import Color, ColorLike, parse_color
+from bouncekit.colors import Color, ColorLike, Fixed, ring_color
 from bouncekit.config import (
     Vec,
     _finite_number,
@@ -36,7 +36,7 @@ class CircleBoundary:
         center: Vec,
         radius: float,
         thickness: float = 8.0,
-        color: ColorLike = "#ffffff",
+        color: ColorLike | Fixed = "#ffffff",
         gap_degrees: float = 0.0,
         angular_velocity: float = 0.0,
         segments: int = 128,
@@ -60,7 +60,7 @@ class CircleBoundary:
         if type(segments) is not int or segments < 8:
             raise ConfigError(f"segments must be an integer >= 8; got {segments!r}")
         elasticity_value = _non_negative_number("elasticity", elasticity)
-        self._color = parse_color(color)
+        self._color = ring_color(color)
         self._tags = _tags(tags)
         glow_value = _glow(glow)
 
@@ -130,8 +130,8 @@ class CircleBoundary:
         return self._color
 
     @color.setter
-    def color(self, value: ColorLike) -> None:
-        self._color = parse_color(value)
+    def color(self, value: ColorLike | Fixed) -> None:
+        self._color = ring_color(value)
 
     @property
     def tags(self) -> frozenset[str]:

@@ -5,6 +5,7 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from bouncekit.actions import (
+    Particles,
     Play,
     Spawn,
     Split,
@@ -12,13 +13,22 @@ from bouncekit.actions import (
     Value,
     end_after,
     flash,
+    particles,
     play,
     resize,
     set_velocity,
     spawn,
     split,
 )
-from bouncekit.colors import ColorLike, parse_color
+from bouncekit.colors import (
+    ByGeneration,
+    BySpeed,
+    ColorLike,
+    ColorSpec,
+    HueCycle,
+    color_source,
+    ring_color,
+)
 from bouncekit.config import Vec, _vec
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, WorldObject
@@ -49,7 +59,8 @@ class ActionContext:
     Methods that change the world (``destroy``, ``split``, ``spawn``, ``recolor``,
     ``resize``, ``set_velocity``, ``flash``, ``end_after``) only queue a command: the
     change is applied after the step's dispatch, never while handlers run. ``play``
-    produces a note trigger immediately (audio only). Bad arguments raise
+    produces a note trigger immediately (audio only); ``particles`` creates a
+    visual-only burst immediately. Bad arguments raise
     ``ConfigError`` at the call.
 
     Attributes:
@@ -130,7 +141,7 @@ class ActionContext:
         radius: float,
         velocity: Value[Vec] = (0.0, 0.0),
         count: int = 1,
-        color: Value[ColorLike] = "#ffffff",
+        color: Value[ColorSpec] = "#ffffff",
         tags: Iterable[str] = ("ball",),
         elasticity: float = 1.0,
         constant_speed: bool = False,
@@ -141,6 +152,7 @@ class ActionContext:
         """Queue ``count`` new balls; options and refusal rules as ``A.spawn`` (FR-207).
 
         Callable ``pos``/``velocity``/``color`` are evaluated now, per ball, in ball order.
+        ``color`` may be a colour mode (FR-306), resolved when the balls are added.
 
         Raises:
             ConfigError: for bad options or a callable returning an invalid value
@@ -168,7 +180,7 @@ class ActionContext:
         for i in range(action.count):
             x, y = _vec("pos", self._eval(action.pos))
             velocity = _vec("velocity", self._eval(action.velocity))
-            color = parse_color(self._eval(action.color))  # type: ignore[arg-type]
+            color = color_source(self._eval(action.color))
             if action.constant_speed:
                 self.scene._check_constant_speed(velocity)
             offset = (i - (action.count - 1) / 2) * step
@@ -193,14 +205,20 @@ class ActionContext:
             return fn(self)
         return value
 
-    def recolor(self, obj: WorldObject, color: ColorLike) -> None:
-        """Queue setting the base colour of ``obj`` (a ball or ring) (FR-210).
+    def recolor(self, obj: WorldObject, color: ColorSpec) -> None:
+        """Queue setting the base colour of ``obj`` (a ball or ring) (FR-210, FR-306).
+
+        A ball takes a colour value or any colour mode (a hue cycle advances when the
+        command is applied); a ring takes a colour value or ``C.fixed(...)`` only.
 
         Raises:
             ConfigError: if ``obj`` is not a ball or ring handle or ``color`` is invalid.
         """
         _check_object("obj", obj)
-        self.scene._queue.append(RecolorCmd(obj, parse_color(color)))
+        if isinstance(obj, CircleBoundary):
+            self.scene._queue.append(RecolorCmd(obj, ring_color(color)))
+        else:
+            self.scene._queue.append(RecolorCmd(obj, color_source(color)))
 
     def resize(self, ball: Ball, radius: float) -> None:
         """Queue changing ``ball``'s radius; refusal rules as ``A.resize`` (FR-210).
@@ -250,6 +268,66 @@ class ActionContext:
         action = flash(obj, seconds=seconds, color=color)
         frames = max(1, round(action.seconds * self.scene.config.fps))
         self.scene._queue.append(FlashCmd(obj, action.color, frames))
+
+    def particles(
+        self,
+        *,
+        pos: Vec,
+        count: int = 12,
+        speed: float = 400.0,
+        lifetime: float = 0.5,
+        size: float = 3.0,
+        color: ColorSpec | None = None,
+        drag: float = 2.0,
+    ) -> None:
+        """Burst impact particles at ``pos`` now; options as ``A.particles`` (FR-305).
+
+        Visual only: draws from ``scene.fx_rng``, never ``scene.rng``.
+
+        Raises:
+            ConfigError: for bad options or a ``pos`` that is not a 2-vector.
+        """
+        action = particles(
+            count=count,
+            speed=speed,
+            lifetime=lifetime,
+            size=size,
+            color=color,
+            drag=drag,
+            pos=_vec("pos", pos),
+        )
+        self._particles_action(action)
+
+    def _particles_action(self, action: Particles) -> None:
+        scene = self.scene
+        pos = action.pos if action.pos is not None else self.event.position
+        if pos is None:
+            return  # unreachable for registered rules (checked at registration)
+        spec = action.color
+        a = self.a
+        if spec is None:
+            color = (255, 255, 255) if a is None else a.color
+        elif isinstance(spec, HueCycle):
+            color = scene._fx.next_hue(spec, burst=True)
+        elif isinstance(spec, BySpeed):
+            color = spec.color_for(a.velocity if isinstance(a, Ball) else (0.0, 0.0))
+        elif isinstance(spec, ByGeneration):
+            color = spec.color_for(a.generation if isinstance(a, Ball) else 0)
+        else:
+            color = spec
+        cfg = scene.config
+        scene._fx.burst(
+            scene.fx_rng,
+            pos=pos,
+            count=action.count,
+            speed=action.speed,
+            lifetime=action.lifetime,
+            size=action.size,
+            color=color,
+            drag=action.drag,
+            fps=cfg.fps,
+            capacity=cfg.effects.max_particles,
+        )
 
     def play(self, source: Source, *, gain: float = 1.0) -> None:
         """Trigger ``source`` now, subject to the audio trigger policy (FR-106, FR-211).

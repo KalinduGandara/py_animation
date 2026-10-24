@@ -44,3 +44,31 @@ def test_trail_glow_render_cost() -> None:
     median = statistics.median(times)
     print(f"\nNFR-303 trail+glow scene (100 balls, ring): median {median:.1f} ms/frame")
     assert median < 250
+
+
+def test_full_effects_scene_render_cost() -> None:
+    from bouncekit import actions as A
+
+    s = _trail_glow_scene()
+    s.every(1 / 60, [A.particles(pos=(540, 960), count=10, lifetime=0.5)])
+    for _ in range(30):  # fill ~300 live particles
+        s.step_frame()
+    assert 250 <= len(s._fx.particles) <= 350
+    r = PygameRenderer(s.config.width, s.config.height)
+    for _ in range(3):
+        s.draw(r)
+        r.to_rgb_bytes()
+        s.step_frame()
+    times = []
+    for _ in range(8):
+        t0 = time.perf_counter()
+        s.draw(r)
+        r.to_rgb_bytes()
+        times.append((time.perf_counter() - t0) * 1000)
+        s.step_frame()
+    median = statistics.median(times)
+    n = len(s._fx.particles)
+    print(
+        f"\nNFR-303 full scene (100 trail+glow balls, ring, {n} particles): {median:.1f} ms/frame"
+    )
+    assert median < 250

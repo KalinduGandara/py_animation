@@ -12,7 +12,7 @@ import numpy as np
 import pymunk
 from numpy.typing import NDArray
 
-from bouncekit.actions import ACTION_TYPES, Handler, Play
+from bouncekit.actions import ACTION_TYPES, Handler, Particles, Play
 from bouncekit.audio.mixer import (
     NoteTrigger,
     limit_true_peak,
@@ -20,7 +20,17 @@ from bouncekit.audio.mixer import (
     num_samples,
     sample_offset,
 )
-from bouncekit.colors import Color, ColorLike
+from bouncekit.colors import (
+    ByGeneration,
+    BySpeed,
+    Color,
+    ColorLike,
+    ColorSource,
+    ColorSpec,
+    Fixed,
+    HueCycle,
+    color_source,
+)
 from bouncekit.config import (
     AudioConfig,
     EffectsConfig,
@@ -468,6 +478,11 @@ class Scene:
                 f"got {handlers!r}"
             )
         for h in handlers:
+            if isinstance(h, Particles) and h.pos is None and kind in ("timer", "condition"):
+                raise ConfigError(
+                    f"pos is required for A.particles on a {kind} rule ({method}): its events "
+                    "have no position; pass A.particles(pos=(x, y))"
+                )
             target = getattr(h, "target", None)
             if isinstance(target, str) and target not in SUBJECTS[kind]:
                 raise ConfigError(
@@ -576,20 +591,32 @@ class Scene:
         self._events.append(ev)
         self._cascade.append(ev)
 
+    def _set_ball_color(self, ball: Ball, source: ColorSource) -> None:
+        """Give ``ball`` a colour or mode; a hue cycle takes its next hue now (FR-306)."""
+        if isinstance(source, HueCycle):
+            ball._set_color(self._fx.next_hue(source), None, source)
+        elif isinstance(source, BySpeed | ByGeneration):
+            ball._set_color(ball.color, source, None)
+        else:
+            ball._set_color(source, None, None)
+
     def _spawn_ball(self, spec: BallSpec, *, generation: int) -> Ball:
         """Add a ball now (command application) and log its spawn event (for the next step)."""
+        plain = isinstance(spec.color, tuple)
         ball = Ball(
             self.space,
             pos=spec.pos,
             radius=spec.radius,
             velocity=spec.velocity,
             elasticity=spec.elasticity,
-            color=spec.color,
+            color=spec.color if isinstance(spec.color, tuple) else (255, 255, 255),
             tags=spec.tags,
             trail=spec.trail,
             glow=spec.glow,
         )
         ball.generation = generation
+        if not plain:
+            self._set_ball_color(ball, spec.color)
         if spec.constant_speed:
             ball.constant_speed = True
             ball.target_speed = math.hypot(*ball.velocity)
@@ -634,7 +661,7 @@ class Scene:
         center: Vec,
         radius: float,
         thickness: float = 8.0,
-        color: ColorLike = "#ffffff",
+        color: ColorLike | Fixed = "#ffffff",
         gap_degrees: float = 0.0,
         angular_velocity: float = 0.0,
         segments: int = 128,
@@ -645,6 +672,7 @@ class Scene:
         """Add a ring boundary; see :class:`CircleBoundary`.
 
         ``angular_velocity`` is in degrees per second, positive = clockwise.
+        ``color`` is a colour value or ``C.fixed(...)`` (no dynamic modes, FR-306).
         ``glow`` (0..4, or a bool for 1/0) adds a blurred light along the drawn arc,
         in the colour the ring is drawn in (FR-304); visual only.
 
@@ -678,7 +706,7 @@ class Scene:
         radius: float,
         velocity: Vec = (0.0, 0.0),
         elasticity: float = 1.0,
-        color: ColorLike = "#ffffff",
+        color: ColorSpec = "#ffffff",
         tags: Iterable[str] = (),
         constant_speed: bool = False,
         trail: bool = False,
@@ -689,6 +717,10 @@ class Scene:
         With ``constant_speed=True``, after every step (after the clamp) the velocity
         is rescaled to the initial speed ``|velocity|`` (``ball.target_speed``),
         keeping its direction; a zero velocity stays zero (FR-212).
+
+        ``color`` is a colour value or a colour mode (FR-306): ``C.fixed(c)`` is ``c``;
+        ``C.hue_cycle()`` gives each new ball the mode's next hue; ``C.by_speed()`` and
+        ``C.by_generation()`` are evaluated whenever the ball is drawn.
 
         Visual only (FR-303, FR-304): ``trail=True`` leaves a fading trail of the
         ball's diameter (length ``effects.trail_seconds``); ``glow`` (0..4, or a bool
@@ -702,6 +734,7 @@ class Scene:
                 ``constant_speed`` is set with an initial speed of 0 or above
                 ``max_speed``.
         """
+        source = color_source(color)
         if type(constant_speed) is not bool:
             raise ConfigError(f"constant_speed must be True or False; got {constant_speed!r}")
         if constant_speed:
@@ -717,13 +750,15 @@ class Scene:
             radius=radius,
             velocity=velocity,
             elasticity=elasticity,
-            color=color,
+            color=source if isinstance(source, tuple) else (255, 255, 255),
             tags=tags,
             trail=trail,
             glow=glow,
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
+        if not isinstance(source, tuple):
+            self._set_ball_color(ball, source)
         if constant_speed:
             ball.constant_speed = True
             ball.target_speed = math.hypot(*ball.velocity)
@@ -766,7 +801,8 @@ class Scene:
         After each step: collect its collision events, clamp speeds, detect escapes,
         emit due timer events, dispatch the previous step's spawn/destroy events and
         then this step's events to the rules, and apply the queued commands (FR-203).
-        After the frame, ``when`` predicates are checked (FR-209).
+        After the frame, ``when`` predicates are checked (FR-209), then impact
+        particles advance by one frame (FR-305, visual only).
         """
         max_speed = self.config.max_speed
         rec = self._recorder
@@ -807,6 +843,9 @@ class Scene:
             self._in_frame = False
         self.frame += 1
         engine.conditions(self._step, frame)
+        fx = self._fx
+        if fx.particles or fx.pending:
+            fx.advance(self.config.fps)
 
     def _use_spatial_hash(self) -> None:
         """Switch the space to pymunk's spatial hash, once (FR-212, C14)."""
@@ -818,7 +857,8 @@ class Scene:
         """Draw the background, trails, every live object and glows (FR-303, FR-304).
 
         Order: background; the trail layer (only while a ball has ``trail``); objects
-        in insertion order; the glow layer (only while an object has ``glow``). An
+        in insertion order; impact particles (FR-305); the glow layer (only while an
+        object has ``glow``). An
         object flashing at the current frame (``A.flash``) is drawn, and glows, in its
         flash colour blended linearly back to its base colour. Drawing never changes
         the simulation; it only updates effect state keyed on ``frame``, so redrawing
@@ -853,6 +893,8 @@ class Scene:
                     light = obj.glow_light(drawn)
                     if light is not None:
                         lights.append(light)
+        for p in fx.particles:
+            renderer.circle((p.x, p.y), p.size, p.color, alpha=1 - p.age / p.life)
         if lights:
             renderer.glow(lights, blur=effects.glow_blur)
 

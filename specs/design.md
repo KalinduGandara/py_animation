@@ -837,6 +837,15 @@ class Effects:
 - `_fill_distance(..., alpha=, target=)`: alpha scales coverage only when `alpha != 1.0`; `circle(alpha <= 0)` draws nothing.
 - Measured (dev machine, `tests/test_perf.py`): 100 trail + glow balls + glowing ring at 1080×1920 ≈ 39 ms/frame median.
 
+### M3.4b Implementation notes (T-302)
+
+- `Effects` gains `particles`, `pending`, `hue_index` (balls) and `next_hue(mode, burst=)`; `Particle` stores its own `damp = exp(-drag/fps)`. `advance` runs at the end of `step_frame` (after `when` rules) only when particles exist, so particle-free scenes are untouched.
+- Colours: `colors.color_source()` validates a colour or mode and replaces `Fixed` by its colour; `BallSpec.color` / `RecolorCmd.color` carry that `ColorSource` and `Scene._set_ball_color` resolves it when the ball is added or the recolor is applied (hue cycles advance only then, so refused commands advance nothing). `colors.ring_color()` enforces "plain or `fixed`" for `add_circle`, `ring.color = …` and `ctx.recolor(ring, …)` (raised at the call).
+- The `pos=None` registration check lives in `Scene._register` (next to the subject-target check) rather than in `rules/engine.py`.
+- Deviation (spec silent): a particle `color` that is a mode is resolved per burst: `fixed` → its colour; `by_speed`/`by_generation` → evaluated on subject `a` if it is a ball (else speed 0 / generation 0); `hue_cycle` → the next hue from a separate per-mode **burst** counter (`Effects.burst_hue`), so particle bursts never shift the hue sequence of balls (FR-306 counts balls only).
+- `ctx.particles` requires `pos` as a 2-vector (FR-305 signature); `A.particles` without `pos` uses the event position.
+- Measured (dev machine, `tests/test_perf.py`): the full NFR-303 scene (100 trail + glow balls, glowing ring, 300 live particles) at 1080×1920 ≈ 45.6 ms/frame median (T-301 scene alone ≈ 42 ms in the same run).
+
 ### M3.5 PygameRenderer additions (FR-302, NFR-303)
 
 - `_fill_distance(..., alpha=1.0, target=None)`: coverage × alpha; `target` defaults to the frame surface (lets trails reuse the SDF code on the trail layer). `circle(..., alpha)` passes it through; `alpha == 1.0` keeps the exact M2 arithmetic (no extra multiply), so existing bytes are unchanged.

@@ -13,6 +13,7 @@ from bouncekit.actions import (
     EndAfter,
     Flash,
     Handler,
+    Particles,
     Play,
     Recolor,
     Resize,
@@ -29,6 +30,9 @@ if TYPE_CHECKING:
     from bouncekit.scene import Scene
 
 __all__ = ["Rule", "RuleEngine", "RuleKind"]
+
+# Built-in actions gated by rule cooldowns (every one except Play).
+_QUEUEING = (Destroy, Split, Spawn, Recolor, Resize, SetVelocity, Flash, EndAfter, Particles)
 
 type RuleKind = Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
 
@@ -252,9 +256,7 @@ class RuleEngine:
             if gated:
                 continue
             fired = True
-            if isinstance(
-                handler, Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter
-            ):
+            if isinstance(handler, _QUEUEING):
                 handler.run(ctx)
             elif rule.kind in ("collision", "escape"):
                 handler(ctx, a, b, ev)

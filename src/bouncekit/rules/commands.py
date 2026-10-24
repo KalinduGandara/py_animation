@@ -11,7 +11,7 @@ import math
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from bouncekit.colors import Color
+from bouncekit.colors import Color, ColorSource
 from bouncekit.config import Vec
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
@@ -54,12 +54,15 @@ class SplitCmd:
 
 @dataclass(frozen=True)
 class BallSpec:
-    """Fully resolved options of one ball to spawn."""
+    """Fully resolved options of one ball to spawn.
+
+    ``color`` is a colour or a colour mode, resolved when the ball is added (FR-306).
+    """
 
     pos: Vec
     radius: float
     velocity: Vec
-    color: Color
+    color: ColorSource
     tags: frozenset[str]
     elasticity: float
     constant_speed: bool = False
@@ -84,10 +87,10 @@ class EndCmd:
 
 @dataclass(frozen=True, eq=False)
 class RecolorCmd:
-    """Set ``obj``'s base colour."""
+    """Set ``obj``'s base colour (a colour mode for balls, resolved when applied)."""
 
     obj: Ball | CircleBoundary
-    color: Color
+    color: ColorSource
 
 
 @dataclass(frozen=True, eq=False)
@@ -132,7 +135,10 @@ def apply(scene: "Scene", cmd: Command) -> None:
     elif isinstance(cmd, EndCmd):
         scene.total_frames = min(scene.total_frames, scene._frames_done + cmd.frames)
     elif isinstance(cmd, RecolorCmd):
-        if cmd.obj.alive:
+        if isinstance(cmd.obj, Ball):
+            if cmd.obj.alive:
+                scene._set_ball_color(cmd.obj, cmd.color)
+        elif cmd.obj.alive and isinstance(cmd.color, tuple):
             cmd.obj.color = cmd.color
     elif isinstance(cmd, ResizeCmd):
         _resize(scene, cmd)
@@ -178,12 +184,15 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
     parent.set_radius(r2)
     parent.position, parent.velocity = states[0]
     parent.generation += 1
+    # New children: the parent's draw-time mode, else the next hue of its hue
+    # cycle, else its colour; the parent (child 0) keeps its colour (FR-306).
+    child_color: ColorSource = parent.color_mode or parent.hue_mode or parent.color
     for pos, vel in states[1:]:
         spec = BallSpec(
             pos,
             r2,
             vel,
-            parent.color,
+            child_color,
             parent.tags,
             parent.shape.elasticity,
             parent.constant_speed,

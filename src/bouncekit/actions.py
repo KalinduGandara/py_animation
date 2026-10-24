@@ -1,6 +1,7 @@
-"""Built-in rule actions (FR-104, FR-206..FR-210).
+"""Built-in rule actions (FR-104, FR-206..FR-210, FR-305).
 
-play, destroy, split, spawn, recolor, resize, set_velocity, flash and end_after.
+play, destroy, split, spawn, recolor, resize, set_velocity, flash, end_after and
+particles.
 
 Actions are immutable values compared by identity. When a rule fires, each action's
 ``run(ctx)`` resolves its target and calls the matching :class:`ActionContext`
@@ -14,7 +15,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from bouncekit.colors import Color, ColorLike, parse_color
+from bouncekit.colors import Color, ColorLike, ColorSource, ColorSpec, color_source, parse_color
 from bouncekit.config import (
     Vec,
     _finite_number,
@@ -40,6 +41,7 @@ __all__ = [
     "EndAfter",
     "Flash",
     "Handler",
+    "Particles",
     "Play",
     "Recolor",
     "Resize",
@@ -50,6 +52,7 @@ __all__ = [
     "destroy",
     "end_after",
     "flash",
+    "particles",
     "play",
     "recolor",
     "resize",
@@ -129,7 +132,7 @@ class Spawn:
     radius: float
     velocity: Value[Vec] = (0.0, 0.0)
     count: int = 1
-    color: Value[Color] = (255, 255, 255)
+    color: Value[ColorSource] = (255, 255, 255)
     tags: frozenset[str] = frozenset({"ball"})
     elasticity: float = 1.0
     max_total: int | None = None
@@ -157,7 +160,7 @@ class EndAfter:
 class Recolor:
     """Set the target's base colour after dispatch (see :func:`recolor`)."""
 
-    color: Value[Color]
+    color: Value[ColorSource]
     target: Target = "a"
 
     def run(self, ctx: "ActionContext") -> None:
@@ -216,7 +219,26 @@ class Flash:
             ctx.flash(obj, seconds=self.seconds, color=self.color)
 
 
-type Action = Play | Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter
+@dataclass(frozen=True, eq=False)
+class Particles:
+    """Burst impact particles when the rule fires (see :func:`particles`); visual only."""
+
+    count: int = 12
+    speed: float = 400.0
+    lifetime: float = 0.5
+    size: float = 3.0
+    color: ColorSource | None = None
+    drag: float = 2.0
+    pos: Vec | None = None
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Create the burst now (drawn from the next frame)."""
+        ctx._particles_action(self)
+
+
+type Action = (
+    Play | Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter | Particles
+)
 """Any built-in action."""
 
 type Handler = Action | Callable[..., object]
@@ -232,6 +254,7 @@ ACTION_TYPES: tuple[type, ...] = (
     SetVelocity,
     Flash,
     EndAfter,
+    Particles,
 )
 
 
@@ -314,8 +337,8 @@ def _value[T](name: str, value: object, check: Callable[[str, object], T]) -> "V
     return check(name, value)
 
 
-def _color(name: str, value: object) -> Color:
-    return parse_color(value)  # type: ignore[arg-type]
+def _color(name: str, value: object) -> ColorSource:
+    return color_source(value, name)
 
 
 def spawn(
@@ -324,7 +347,7 @@ def spawn(
     radius: float,
     velocity: Value[Vec] = (0.0, 0.0),
     count: int = 1,
-    color: Value[ColorLike] = "#ffffff",
+    color: Value[ColorSpec] = "#ffffff",
     tags: Iterable[str] = ("ball",),
     elasticity: float = 1.0,
     constant_speed: bool = False,
@@ -336,7 +359,8 @@ def spawn(
 
     ``pos``, ``velocity`` and ``color`` each take a value or a callable ``f(ctx)``,
     evaluated once per ball, in ball order, when the rule runs (use ``ctx.rng`` for
-    randomness). Ball ``i`` is offset from ``pos`` by
+    randomness). ``color`` may be a colour mode (``C.hue_cycle()`` etc., FR-306),
+    resolved per ball when the balls are added. Ball ``i`` is offset from ``pos`` by
     ``(i - (count - 1) / 2) * (2 * radius + 1)`` px along +x. Each new ball has
     generation 0 and logs a ``"spawn"`` event (dispatched at the next step).
 
@@ -380,11 +404,12 @@ def _bool(name: str, value: object) -> bool:
     return value
 
 
-def recolor(color: Value[ColorLike], *, target: Target = "a") -> Recolor:
-    """Return an action that sets the target's base colour (FR-210).
+def recolor(color: Value[ColorSpec], *, target: Target = "a") -> Recolor:
+    """Return an action that sets the target's base colour (FR-210, FR-306).
 
-    ``color`` is a colour value or a callable ``f(ctx)`` evaluated when the rule
-    runs. Works on balls and rings.
+    ``color`` is a colour value, a colour mode (balls only; rings take a value or
+    ``C.fixed``) or a callable ``f(ctx)`` evaluated when the rule runs. Works on
+    balls and rings.
 
     Raises:
         ConfigError: if ``color`` is not a colour or callable, or ``target`` is invalid.
@@ -475,3 +500,47 @@ def end_after(seconds: float) -> EndAfter:
         ConfigError: if ``seconds`` is not a finite number >= 0.
     """
     return EndAfter(seconds=_non_negative_number("seconds", seconds))
+
+
+MAX_BURST = 500
+"""Largest ``count`` of one particle burst."""
+
+
+def particles(
+    *,
+    count: int = 12,
+    speed: float = 400.0,
+    lifetime: float = 0.5,
+    size: float = 3.0,
+    color: ColorSpec | None = None,
+    drag: float = 2.0,
+    pos: Vec | None = None,
+) -> Particles:
+    """Return an action that bursts ``count`` impact particles (FR-305); visual only.
+
+    The burst starts at ``pos`` or, for ``None``, the event's position (a collision's
+    contact point). Particle ``i`` moves in a random direction at
+    ``speed * U(0.4, 1)`` px/s (drawn from ``scene.fx_rng``, never ``scene.rng``),
+    slows by ``exp(-drag / fps)`` per frame, is first drawn the frame after the
+    event as a disc of radius ``size`` and fades out linearly over ``lifetime``
+    seconds. ``color`` is a colour or colour mode; ``None`` uses subject ``a``'s
+    current colour (white without one). Bursts beyond ``EffectsConfig.max_particles``
+    live particles are truncated. Gated by rule cooldowns like other non-play
+    actions. ``pos=None`` on a timer or condition rule raises at registration.
+
+    Raises:
+        ConfigError: if ``count`` is not an int in 1..500, ``speed``/``lifetime``/
+            ``size`` are not positive and finite, ``drag`` is negative or not finite,
+            ``color`` is not a colour or mode, or ``pos`` is not ``None`` or a 2-vector.
+    """
+    if type(count) is not int or not 1 <= count <= MAX_BURST:
+        raise ConfigError(f"count must be an integer in 1..{MAX_BURST}; got {count!r}")
+    return Particles(
+        count=count,
+        speed=_positive_number("speed", speed),
+        lifetime=_positive_number("lifetime", lifetime),
+        size=_positive_number("size", size),
+        color=None if color is None else color_source(color),
+        drag=_non_negative_number("drag", drag),
+        pos=None if pos is None else _vec("pos", pos),
+    )
