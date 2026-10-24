@@ -1,7 +1,7 @@
 [project]
 name = "bouncekit"
 version = "0.1.0"
-description = "Add your description here"
+description = "Deterministic 2D physics videos"
 readme = "README.md"
 authors = [
     { name = "KalinduGandara", email = "kalindugandara16@gmail.com" }
@@ -13,6 +13,9 @@ dependencies = [
     "pymunk>=7.3.1",
 ]
 
+[project.scripts]
+bouncekit = "bouncekit.cli:main"
+
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
@@ -23,3 +26,20 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+files = ["src"]
+python_version = "3.12"
+strict = true
+warn_unreachable = true

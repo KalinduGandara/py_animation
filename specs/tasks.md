@@ -2,7 +2,7 @@
 
 Each task: tests first → implement → `uv run pytest && uv run ruff check . && uv run mypy` → tick here → log in `progress.md` → commit `feat(<area>): T-00X <desc> [FR-…]`.
 
-- [ ] T-001: Scaffolding — pyproject (entry point `bouncekit = "bouncekit.cli:main"`, pytest/ruff/mypy config, strict-ish mypy on `src`), package skeleton dirs, `.gitignore`, one trivial passing test.
+- [x] T-001: Scaffolding — pyproject (entry point `bouncekit = "bouncekit.cli:main"`, pytest/ruff/mypy config, strict-ish mypy on `src`), package skeleton dirs, `.gitignore`, one trivial passing test.
   - Requirements: NFR-005
   - Files: pyproject.toml, src/bouncekit/**/__init__.py, tests/test_smoke.py
   - Done when: `uv run pytest`, `uv run ruff check .`, `uv run mypy` all pass.
