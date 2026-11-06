@@ -28,7 +28,7 @@ with the current library; otherwise the needed framework item (§3) is named.
 | # | Idea | Hook text | Why it should work | Needs |
 |---|---|---|---|---|
 | 1 | **Color Wars, 4 teams** (extend `color_wars.py`): 4 named colours, last to 30% loses / first wins — **BUILT** `scenes/color_wars_4.py` (first to 20%, leader on time at 38 s) | "Pick your color 👇" | Comment bait, real uncertainty, series-able | Now |
-| 2 | **Maze escape**: one ball in a polygon maze inside the ring; each wall hit plays a note | "Can it find the exit?" | Maze reported as best performer; long tension | Now (static polygons) |
+| 2 | **Maze escape**: one ball in a polygon maze inside the ring; each wall hit plays a note — **BUILT** `scenes/maze_escape.py` (random polar maze per seed) | "Can it find the exit?" | Maze reported as best performer; long tension | Now (static polygons) |
 | 3 | **Plinko prediction**: 100 balls drop through pegs into 5 labelled slots | "Which slot wins?" | Viewers predict, then watch to check | Now (`examples/static_shapes.py` base) |
 | 4 | **Escape race**: 2–4 coloured balls in one spinning-gap ring, first out wins | "Which one escapes first?" | Simple, fast payoff, loopable | Now |
 | 5 | **Shrinking arena / last ball standing**: ring shrinks every N s (replace with a smaller ring), balls touching a hazard die | "Only one survives" | Elimination suspense | Now (destroy + `ctx.add_circle`); nicer with F4 |

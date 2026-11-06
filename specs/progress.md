@@ -172,6 +172,10 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
     (20%) wins, else "TIME! … LEADS" at `decide` (38 s). Seed 1: Leaf leads, Water overtakes
     (17.7% at 18 s), Leaf comes back and Bolt surges; Leaf wins 20-18 at 23 s (25.5 s video,
     loop fade, thumbnail = win frame). Awaiting review.
+  - `maze_escape.py` (M6 video 2): random polar maze (4 rings, `braid` 0.25 loops, 3 hub doors)
+    from static polygons; ball (800 px/s, ±20° turn per hit, long trail) explores; Für Elise
+    per wall hit; seed 12 escapes at 32.3 s ("ESCAPED in 0:32.3!", 34.8 s video). Perfect
+    mazes (no braid) trapped the ball in 8/10 seeds; noted in the skill lessons. Awaiting review.
   - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
 - **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
