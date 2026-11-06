@@ -30,7 +30,7 @@ with the current library; otherwise the needed framework item (§3) is named.
 | 1 | **Color Wars, 4 teams** (extend `color_wars.py`): 4 named colours, last to 30% loses / first wins — **BUILT** `scenes/color_wars_4.py` (first to 20%, leader on time at 38 s) | "Pick your color 👇" | Comment bait, real uncertainty, series-able | Now |
 | 2 | **Maze escape**: one ball in a polygon maze inside the ring; each wall hit plays a note — **BUILT** `scenes/maze_escape.py` (random polar maze per seed) | "Can it find the exit?" | Maze reported as best performer; long tension | Now (static polygons) |
 | 3 | **Plinko prediction**: 100 balls drop through pegs into 5 labelled slots — **BUILT** `scenes/plinko.py` | "Which slot wins?" | Viewers predict, then watch to check | Now (`examples/static_shapes.py` base) |
-| 4 | **Escape race**: 2–4 coloured balls in one spinning-gap ring, first out wins | "Which one escapes first?" | Simple, fast payoff, loopable | Now |
+| 4 | **Escape race**: 2–4 coloured balls in one spinning-gap ring, first out wins — **BUILT** `scenes/escape_race.py` (4 animal emoji, near-miss counter) | "Which one escapes first?" | Simple, fast payoff, loopable | Now |
 | 5 | **Shrinking arena / last ball standing**: ring shrinks every N s (replace with a smaller ring), balls touching a hazard die | "Only one survives" | Elimination suspense | Now (destroy + `ctx.add_circle`); nicer with F4 |
 | 6 | **Guess the song**: hits reveal a public-domain melody note by note | "Guess the song before it ends" | Comments + rewatches | Now |
 | 7 | **Name battles**: balls carry names/emoji (countries, zodiac, games) | "Your country vs mine" | Identity drives comments and shares | F1 labels (and F6 images for flags) |
@@ -84,8 +84,10 @@ Suggested order: F2 → F1 → F7 → F8 (cheap, help every upload), then F3 →
 
 ## 5. Next session checklist
 
-- Ask the user which backlog ideas to make next (top picks: 1, 2, 3, 4).
-- Ask whether to start F2 (seed scoring) and F1 (ball labels) as milestone M6.
+- Done 2026-11-06: M6 part 1 (F2, F1, F7, F8) and backlog videos 1–4.
+- Ask the user for feedback on the four new videos, then which to make next: backlog 5–10 (6 "Guess
+  the song" and 9 "1 vs 100" need no new framework), or M6 part 2 (F3 kinematic polygons /
+  resizable rings → F4 arena tools → F5 beat sync → F9 render speed → F6 sprites → F10 sound).
 - Keep `specs/progress.md` "Where we left off" and README "What you can make" up to date.
 
 ## Sources

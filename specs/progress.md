@@ -180,12 +180,21 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
     11 rows of 12-gon pegs + wall bumpers into 5 slots; counts under the slots; "SLOT N WINS!"
     only after all 100 land ("TIE!" if level). Seed 1: slot 2 leads from the start, slot 5
     overtakes at ~16 s and wins 24-23 (22.6 s video). Awaiting review.
+  - `escape_race.py` (M6 video 4): 🐸🐱🐶🦊 balls in one ring with a 14° gap spinning at
+    70°/s; near misses (hits within gap/2 + 12° of the gap centre) flash the ring and are
+    counted; first out wins. Seed 12 picked with `batch --seeds 3,4,10,12 --score
+    "stats.escaped*100 - abs(stats.escape_time-24) + stats.near_misses/2" --keep-best 1`:
+    🐸 escapes at 24.7 s after 30 near misses, cat and fox right behind (27.2 s). Awaiting review.
   - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
 - **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
   Metadata `duration` reports the configured length even when `end_after` ends a video early
   (frames are correct). Preview is silent.
-- **Next steps:** see `specs/roadmap.md` (researched video backlog, proposed framework
-  items F1–F10 as M6, growth playbook). Ask the user which to start; nothing there is built.
+- **Next steps:** M6 part 1 and backlog videos 1–4 are done (2026-11-06) and await the user's
+  review. Then see `specs/roadmap.md` §5: backlog 5–10 or M6 part 2 (F3–F6, F9, F10, not
+  started; ask first).
+- **Probing scenes headlessly:** load with `cli.load_scene(path, seed=, params=)`, call
+  `step_frame()` until `frame == total_frames` and read `scene.stats` (no drawing; a 25 s
+  scene probes in 1–4 s). Every M6 scene records its outcome with `scene.stat`.
 - **Lessons for writing scenes:** `.claude/skills/bouncekit-video/SKILL.md` § "Lessons from past
   scenes".

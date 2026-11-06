@@ -60,9 +60,10 @@ small reference scenes (tested), `scenes/` are finished Shorts-style videos.
 | Hook title, live counters | `add_text(str, end=)`, `add_text(lambda s: ...)` | `examples/param_sweep.py`, all `scenes/` |
 | Names / emoji on balls (teams, countries), kept on split | `add_ball(..., label="🔥")`, `A.spawn(label=)` | `examples/team_race.py`, `scenes/color_wars_4.py` |
 | Emoji in any text (single symbols; no flags) | bundled Noto Emoji fallback | `examples/team_race.py` |
-| Pick the best seed automatically (closest race, fastest end) | `scene.stat`, `batch --score EXPR --keep-best N` | `examples/team_race.py` |
+| Pick the best seed automatically (closest race, fastest end) | `scene.stat`, `batch --score EXPR --keep-best N` | `examples/team_race.py`, `scenes/escape_race.py` |
 | Ending that loops back into the start | `Scene(loop_fade=0.4)` | `examples/team_race.py` |
-| Thumbnail of the climax + title/description/hashtags file | `A.mark_climax()`, `scene.post(...)`, `--export` | `examples/team_race.py` |
+| Thumbnail of the climax + title/description/hashtags file | `A.mark_climax()`, `scene.post(...)`, `--export` | `examples/team_race.py`, all four M6 `scenes/` |
+| Mazes, Plinko boards (many static polygons) | `scene.add_polygon` in loops | `scenes/maze_escape.py`, `scenes/plinko.py` |
 | Tweakable knobs, seed sweeps | `scene.param`, `--set`, `bouncekit batch` | `examples/param_sweep.py` |
 | Live preview with hot reload (silent) | `bouncekit preview` | any |
 
