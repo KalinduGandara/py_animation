@@ -58,7 +58,7 @@ small reference scenes (tested), `scenes/` are finished Shorts-style videos.
 | Fill colour / texture patterns (scene-level) | polygons coloured per band | `scenes/fill_the_circle.py` (`--set texture=rings`) |
 | Territory battle between balls (fill / erode, first to N% wins) | `ctx.add_polygon` pieces per colour + own state | `scenes/color_wars.py` |
 | Hook title, live counters | `add_text(str, end=)`, `add_text(lambda s: ...)` | `examples/param_sweep.py`, all `scenes/` |
-| Names / emoji on balls (teams, countries), kept on split | `add_ball(..., label="🔥")`, `A.spawn(label=)` | `examples/team_race.py` |
+| Names / emoji on balls (teams, countries), kept on split | `add_ball(..., label="🔥")`, `A.spawn(label=)` | `examples/team_race.py`, `scenes/color_wars_4.py` |
 | Emoji in any text (single symbols; no flags) | bundled Noto Emoji fallback | `examples/team_race.py` |
 | Pick the best seed automatically (closest race, fastest end) | `scene.stat`, `batch --score EXPR --keep-best N` | `examples/team_race.py` |
 | Ending that loops back into the start | `Scene(loop_fade=0.4)` | `examples/team_race.py` |

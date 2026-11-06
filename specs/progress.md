@@ -147,6 +147,9 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
 
 ### Where we left off (2026-11-06) — read this first in a new session
 
+- **M6 part 1 (2026-11-06):** F2 seed scoring, F1 labels + emoji font, F7 loop fade, F8 export
+  pack are built (T-601..T-607 + review fixes); see README § "Upload helpers (M6)" and
+  `examples/team_race.py`. Videos 1–4 of roadmap §2 are being made in order (status in roadmap).
 - **Library:** M0–M4 complete. From M5, only T-501 (`ctx.add_circle`) and T-502 (static convex
   polygons: `scene.add_polygon`, `ctx.add_polygon`, `Renderer.polygon`) are built, at the user's
   request. Everything else in M5 (dynamic polygons, segments, joints, camera) is not started and
@@ -165,6 +168,10 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
   - `color_wars.py`: blue vs pink ball; hitting free space or your colour grows it, hitting the
     other colour wears it away at `erode` x the rate; first to `target` (30%) wins, else the
     leader at 55 s. Seed 1: pink leads, blue comes back and wins 30-22 at ~42 s. Awaiting review.
+  - `color_wars_4.py` (M6 video 1): Fire/Water/Leaf/Bolt (emoji labels), first to `target`
+    (20%) wins, else "TIME! … LEADS" at `decide` (38 s). Seed 1: Leaf leads, Water overtakes
+    (17.7% at 18 s), Leaf comes back and Bolt surges; Leaf wins 20-18 at 23 s (25.5 s video,
+    loop fade, thumbnail = win frame). Awaiting review.
   - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
 - **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.

@@ -1,6 +1,7 @@
 # Roadmap: viral video ideas, framework improvements, growth plan
 
-Written 2026-11-06 after web research. Nothing here is built yet unless it says so; each
+Written 2026-11-06 after web research. Status markers (**BUILT** / not built) are kept current;
+anything without **BUILT** is not built. Each
 framework item still goes through the normal spec → tasks → tests flow and needs the user's
 go-ahead (CLAUDE.md: no later milestones without asking).
 
@@ -26,7 +27,7 @@ with the current library; otherwise the needed framework item (§3) is named.
 
 | # | Idea | Hook text | Why it should work | Needs |
 |---|---|---|---|---|
-| 1 | **Color Wars, 4 teams** (extend `color_wars.py`): 4 named colours, last to 30% loses / first wins | "Pick your color 👇" | Comment bait, real uncertainty, series-able | Now |
+| 1 | **Color Wars, 4 teams** (extend `color_wars.py`): 4 named colours, last to 30% loses / first wins — **BUILT** `scenes/color_wars_4.py` (first to 20%, leader on time at 38 s) | "Pick your color 👇" | Comment bait, real uncertainty, series-able | Now |
 | 2 | **Maze escape**: one ball in a polygon maze inside the ring; each wall hit plays a note | "Can it find the exit?" | Maze reported as best performer; long tension | Now (static polygons) |
 | 3 | **Plinko prediction**: 100 balls drop through pegs into 5 labelled slots | "Which slot wins?" | Viewers predict, then watch to check | Now (`examples/static_shapes.py` base) |
 | 4 | **Escape race**: 2–4 coloured balls in one spinning-gap ring, first out wins | "Which one escapes first?" | Simple, fast payoff, loopable | Now |
@@ -46,14 +47,14 @@ Ordered by how many backlog ideas they unlock per unit of work.
 
 | ID | Item | Unlocks | Size |
 |---|---|---|---|
-| F1 | **Ball labels**: `add_ball(..., label="BR")` / text or emoji drawn on the ball, follows it, inherited on split | 7, 1, 9 | S |
-| F2 | **Seed scoring in batch**: `bouncekit batch ... --score expr` ranks renders by a metric from metadata (closeness of a race, final count, time to end) and writes `ranking.json`; `--keep-best N` | every competition video (pick the closest race automatically) | S |
+| F1 | **BUILT (M6, T-603/T-604)** **Ball labels**: `add_ball(..., label="BR")` / text or emoji drawn on the ball, follows it, inherited on split | 7, 1, 9 | S |
+| F2 | **BUILT (M6, T-601/T-602)** **Seed scoring in batch**: `bouncekit batch ... --score expr` ranks renders by a metric from metadata (closeness of a race, final count, time to end) and writes `ranking.json`; `--keep-best N` | every competition video (pick the closest race automatically) | S |
 | F3 | **Kinematic (rotating/moving) polygons** and **resizable rings** (rest of M5) | 8, 5, rotating mazes | M |
 | F4 | **Arena tools**: `A.shrink_ring`, timed hazards, safe-zone guides in preview (top/bottom UI bars) | 5, all (hook placement) | S |
 | F5 | **Beat/tempo sync**: schedule events on a tempo (`scene.on_beat(bpm)`) and a background music bed mixed under hit notes | 10, polish everywhere | M |
 | F6 | **Image sprites**: PNG for balls/backgrounds (flags, logos the user owns) | 7 | M |
-| F7 | **Loop-friendly endings**: helper that cross-fades the last 0.5 s into frame 0, or starts/ends on the same composition | retention on all videos | S |
-| F8 | **Export pack**: thumbnail PNG of the climax frame, title/description/hashtag text file from scene metadata, optional 4:5 and 1:1 crops | upload workflow | S |
+| F7 | **BUILT (M6, T-605; `Scene(loop_fade=)`)** **Loop-friendly endings**: helper that cross-fades the last 0.5 s into frame 0, or starts/ends on the same composition | retention on all videos | S |
+| F8 | **BUILT (M6, T-606; no crops, by choice)** **Export pack**: thumbnail PNG of the climax frame, title/description/hashtag text file from scene metadata, optional 4:5 and 1:1 crops | upload workflow | S |
 | F9 | **Render speed**: profile polygon/glow drawing (Color Wars renders at ~4.4 s per video second); cache static layers, draw unchanged polygons once | faster batches = more A/B | M |
 | F10 | **More sound**: SFX voices (pop, crunch, whoosh), pitch by ball size, sidechain-style ducking under the music bed | polish | S |
 
