@@ -1174,3 +1174,138 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 - `AddRingCmd` became `AddStaticCmd(obj)` for rings and polygons; `commands._add_static` refuses on `obj.overlaps(ball)` (and ring tunnelling); `Scene._add_static` adds, registers, appends rings to `_rings`, and logs the spawn event. `Scene._remove` only touches `_rings` for rings.
 - `PygameRenderer.polygon` reuses `_fill_distance`: distance is the max signed distance to the edge lines minus 0.5 px (exact inside and along edges; near corners it slightly over-covers, invisible at 1 px).
 - Not done (rest of M5): segments, dynamic polygons, joints, camera.
+
+## M6 part 1 — Upload helpers (F2, F1, F7, F8)
+
+### M6.1 Overview
+
+```mermaid
+flowchart LR
+  script[scene script] -->|stat / post / labels / loop_fade| Scene
+  rules[rules: A.mark_climax, end_after] -->|commands| Scene
+  Scene -->|frames: delay line + fade, climax capture| Writer[FfmpegWriter]
+  Scene -->|audio_buffer + fade ramp| Mux[mux]
+  Scene --> CLI
+  CLI -->|metadata JSON incl. stats| Disk[(out/)]
+  CLI -->|--export: thumb PNG, post.txt| Disk
+  CLI -->|batch --score: scoring.py| Rank[ranking.json, --keep-best]
+```
+
+Simulation is untouched. Every M6 feature is either visual (labels, emoji, fade), recorded
+state the simulation never reads (stats, climax, post), or CLI-side (scoring, export).
+
+### M6.2 Modules (new / changed)
+
+| Module | Change | Requirements |
+|---|---|---|
+| `scene.py` | `stat`, `stats`, `post`, `post_text`, `loop_fade` config, `climax_frame`, `climax_image`; `frames()` delay line + climax capture; label drawing in `draw`; audio fade in `render` | FR-601, 605, 607–610 |
+| `config.py` | `SceneConfig.loop_fade` validation | FR-607 |
+| `world/ball.py` | `label`, `label_color`, `label_scale` attributes + validation helper | FR-605 |
+| `rules/commands.py`, `rules/context.py`, `actions.py` | `BallSpec` label fields, split inheritance, `MarkClimaxCmd`, `ctx.mark_climax`, `A.mark_climax`, `A.spawn`/`ctx.spawn` label options | FR-605, FR-609 |
+| `render/pygame_renderer.py` | emoji fallback in `text` | FR-606 |
+| `fonts/NotoEmoji.ttf`, `fonts/OFL.txt` (new) | bundled font | FR-606, NFR-602 |
+| `export/metadata.py` | `stats` key, real `duration` | FR-602 |
+| `export/post.py` (new) | `Post` dataclass, validation, file text | FR-610 |
+| `export/pack.py` (new) | write thumbnail PNG (pygame) and post text | FR-611 |
+| `scoring.py` (new) | expression parser/evaluator, ranking, keep-best | FR-603, FR-604 |
+| `batch.py`, `cli.py` | `--score`, `--keep-best`, `--export` | FR-603, 604, 611 |
+
+### M6.3 Public API
+
+```python
+scene = Scene(..., loop_fade=0.5)                       # FR-607/608
+scene.stat("blue", 0.31)                                # FR-601
+scene.stats -> dict[str, int | float | bool]
+scene.post(title="Which color wins?", description=lambda s: ..., hashtags=["physics", "satisfying"])
+scene.post_text() -> str | None
+scene.climax_frame -> int | None; scene.climax_image -> bytes | None
+scene.add_ball(..., label="🔥", label_color=None, label_scale=1.0)
+A.spawn(..., label=None, label_color=None, label_scale=1.0); ctx.spawn(... same ...)
+A.mark_climax(); ctx.mark_climax()
+```
+
+CLI: `render … [--export]`; `batch … [--score EXPR] [--keep-best N] [--export]`.
+
+### M6.4 Scoring (FR-603, FR-604)
+
+`scoring.compile_score(expr) -> Score` parses with `ast.parse(expr, mode="eval")` and walks the
+tree once, accepting only `Constant` (int/float), `BinOp` (`Add Sub Mult Div FloorDiv Mod Pow`),
+`UnaryOp` (`UAdd USub`), `Call` of a bare `abs/min/max/round` name with positional args,
+`Name` in `{duration, frames, seed, sound_triggers}` and `Attribute` on a `Name` in
+`{stats, events, params}`. Anything else raises `ConfigError("--score: … not allowed")`.
+`Score.evaluate(metadata) -> float` walks the same tree; missing keys, non-numeric values or
+arithmetic errors raise `ScoreError` (caught per job). `rank(results, metas, score)` builds the
+entries; `keep_best(entries, n)` deletes files with `Path.unlink(missing_ok=True)`. Metadata is
+read back from each job's JSON (no change to `JobResult` or the worker pipe).
+
+Alternative rejected: `eval` with empty builtins (escapable; not worth the risk for a CLI that
+may be scripted).
+
+### M6.5 Labels and emoji (FR-605, FR-606)
+
+`Ball` stores the three label fields (validated by `_label_options` in `world/ball.py`, reused by
+`BallSpec` construction). `Scene._spawn_ball` passes them through; split children copy them in
+the same place colour and trail are inherited. `Scene.draw` collects labels while iterating
+objects and draws them after `renderer.glow(...)` and before texts, using the flash-or-base
+colour to pick the auto contrast. Labels reuse `Renderer.text` (no protocol change).
+
+`PygameRenderer.text` loads the emoji font lazily per size. It splits the line into runs by
+font (default if `default.get_metrics(ch)[0]` is not `None`, else emoji if the emoji font has
+the glyph, else default). A single default run takes the pre-M6 code path verbatim (byte
+identity). Mixed runs are measured with each font's advances; the line box uses the default
+font's ascender/descender so emoji labels sit on the same baseline as text.
+
+### M6.6 Loop fade and climax capture (FR-607–FR-609)
+
+`Scene.frames()` draws into the renderer as before. With `loop_fade == 0` it yields each frame
+directly (unchanged path) and keeps only the last frame's bytes and the climax frame's bytes.
+With `loop_fade > 0` it keeps frame 0 as a numpy array and a deque of the latest N frames;
+a frame is yielded once N newer frames exist; when the loop ends (`frame == total_frames`) the
+remaining ≤ N frames are blended with frame 0 (`t = i/(N+1)`, uint8 via float32 and
+`np.rint`) and yielded. N uses the final `total_frames`, capped at `frames − 1`.
+Climax capture happens at draw time: when the frame being drawn equals `climax_frame`, its
+bytes are stored. `MarkClimaxCmd` sets `scene._climax = scene._sim_frame + 1`; `EndCmd`
+records `scene._end_climax` the first time it is applied.
+
+`Scene.render` applies `fade_out(buffer, start_sample)` (in `export/audio.py`) when
+`loop_fade > 0`, where `start_sample = num_samples(frames − N, fps)`.
+
+### M6.7 Post text and export pack (FR-610, FR-611)
+
+`export/post.py`: frozen `Post(title, description, hashtags)`; `make_post(...)` validates;
+`format_post(post, scene) -> str`:
+
+```
+TITLE
+<title>
+
+DESCRIPTION
+<description>
+
+HASHTAGS
+#a #b
+```
+
+`export/pack.py`: `write_pack(scene, video) -> list[Path]` writes the PNG via
+`pygame.image.frombuffer(bytes, (w, h), "RGB")` + `pygame.image.save`, and the post text when
+present. `run_job(..., export=True)` calls it after metadata; on failure all of a job's files
+are removed (existing cleanup extended to the pack names).
+
+### M6.8 Determinism and compatibility (NFR-601)
+
+- No M6 code runs inside `step_frame` except the two queued commands, which only set integers.
+- Default paths are unchanged: no labels → no label `text` calls; `loop_fade == 0` → no delay
+  line; ASCII text → single default run; metadata adds keys only when stats exist.
+- Tests compare frame hashes of an M5 example scene before/after, and run label/fade/climax
+  scenes twice for identical bytes.
+
+### M6.9 Key decisions and alternatives
+
+- **Stats via explicit `scene.stat`**, not by scanning `scene.events` or reading script globals:
+  explicit, cheap, and keeps the JSON readable. Rejected: auto-exporting text overlays' values.
+- **Delay line for the fade** instead of requiring the end to be known: `end_after` decides the
+  end during simulation; holding N frames (~190 MB at 1080×1920, N = 30) is acceptable.
+  Rejected: re-encoding the tail with ffmpeg afterwards (second pass, audio resync).
+- **Climax defaults to the end trigger**: every video so far ends with `when(...) + end_after`
+  right after its climax, so the default works without changes.
+- **Font in the package, not `assets/`**: the library needs it at runtime from any directory.

@@ -250,3 +250,66 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `ctx.add_polygon` is queued, refused on ball overlap, recolourable, flashable and destroyable with spawn/destroy events.
     - `Renderer.polygon` fills, two polygons sharing an edge leave no dark seam, same calls give the same bytes; `Scene.draw` uses the flash colour.
     - A scene adding polygons from a rule is deterministic.
+
+## M6 part 1 — Upload helpers (F2, F1, F7, F8)
+
+- [ ] T-601: Scene stats and metadata fixes.
+  - Requirements: FR-601, FR-602, NFR-601
+  - Files: src/bouncekit/scene.py, export/metadata.py; tests/test_stats.py (new)
+  - Done when these tests pass:
+    - `scene.stat` records, replaces and keeps order; bad name/value raise `ConfigError` naming the field; `stats` is a copy.
+    - A CLI render of a scene with stats has `"stats"` right after `"sound_triggers"`; without stats the keys equal M4's.
+    - A scene ended by `end_after` reports `duration == frames / fps`; an unended one keeps its configured duration.
+    - Stats leave events, ball states and rng state unchanged.
+
+- [ ] T-602: `batch --score`, `ranking.json`, `--keep-best`.
+  - Requirements: FR-603, FR-604
+  - Files: src/bouncekit/scoring.py (new), batch.py, cli.py; tests/test_scoring.py (new)
+  - Done when these tests pass:
+    - The evaluator handles numbers, operators, `abs/min/max/round`, names and `stats./events./params.` attributes; disallowed nodes (`__import__`, attribute chains, lambdas, comparisons, subscripts) raise `ConfigError`.
+    - `batch --seeds 1-3 --score …` writes `ranking.json` sorted by score with ties in job order; a bad expression exits 2 before any job runs.
+    - A job missing a stat gets `score: null` + `error`, ranks last, exit code 0.
+    - `--keep-best 1` leaves only the best job's MP4/JSON and marks `kept`; `--keep-best` without `--score` or with N < 1 exits 2.
+
+- [ ] T-603: Bundled emoji font and emoji fallback in `Renderer.text`.
+  - Requirements: FR-606, NFR-601, NFR-602
+  - Files: src/bouncekit/fonts/NotoEmoji.ttf + OFL.txt (new), render/pygame_renderer.py, render/base.py (docstring); tests/test_emoji.py (new)
+  - Done when these tests pass:
+    - The font and licence are found via the package path.
+    - ASCII text gives the same bytes as the pre-M6 code (golden hash of a fixed line recorded before the change).
+    - `"👇"` draws non-background pixels where the default font would draw a tofu box (differs from rendering the bare default font), and `"A👇"` is centred on its total advance.
+    - U+FE0F is dropped (`"❤️"` == `"❤"` bytes); same calls give the same bytes.
+
+- [ ] T-604: Ball labels.
+  - Requirements: FR-605, NFR-601
+  - Files: src/bouncekit/world/ball.py, scene.py, rules/commands.py, rules/context.py, actions.py; tests/test_labels.py (new)
+  - Done when these tests pass:
+    - Options validate (`label` type, `label_color`, `label_scale` > 0) with the field named.
+    - A spy renderer sees one `text(label, ball.position, scale*radius, colour)` per labelled ball after `glow` and before overlay text; auto contrast picks `#111111` on yellow and `#ffffff` on navy.
+    - Split children and spawned balls carry the labels; changing `ball.label` changes the next frame.
+    - Labels change no events/ball states/rng; a label-free example scene keeps its frame hashes.
+
+- [ ] T-605: Loop fade (video and audio).
+  - Requirements: FR-607, FR-608, NFR-601, NFR-603
+  - Files: src/bouncekit/config.py, scene.py, export/audio.py; tests/test_loop_fade.py (new)
+  - Done when these tests pass:
+    - `loop_fade` validation; frame count unchanged; frames before the window equal the no-fade frames; window frame i equals the G7 blend of the no-fade frame with frame 0.
+    - Works when `end_after` ends the video earlier than the window would start (window follows the real end); N capped at frames − 1.
+    - The audio buffer used for the mux is ramped to 0 over the window; `loop_fade=0` keeps frame and audio bytes.
+    - The delay line never holds more than N + 1 frames.
+
+- [ ] T-606: Climax frame, `scene.post`, `--export` pack.
+  - Requirements: FR-609, FR-610, FR-611
+  - Files: src/bouncekit/scene.py, rules/commands.py, rules/context.py, actions.py, export/post.py (new), export/pack.py (new), batch.py, cli.py, scoring.py (keep-best deletes pack files); tests/test_export_pack.py (new)
+  - Done when these tests pass:
+    - `mark_climax` sets `climax_frame` to F + 1, last call wins; default is the frame after the first `end_after`; `climax_image` equals the bytes of that frame from a plain `frames()` run.
+    - `post` validation and `post_text` format (callables evaluated, `#` added).
+    - `render --export` writes a 1080×1920-style PNG (size from config) whose pixels equal `climax_image`, and the post file; without `post` it writes only the PNG and prints the note; a failed job leaves no pack files; `batch --export --keep-best` deletes losers' pack files.
+
+- [ ] T-607: Example, README, skill guide.
+  - Requirements: FR-612
+  - Files: examples/team_race.py (new), tests/test_example.py, README.md, .claude/skills/bouncekit-video/SKILL.md, CLAUDE.md
+  - Done when these tests pass:
+    - The example loads, has labelled balls (one emoji), records stats, sets `loop_fade`, marks a climax and posts; a short `render --export` writes MP4, JSON with stats, PNG and post text.
+    - The README test checks the M6 terms (`label=`, `scene.stat`, `--score`, `--keep-best`, `loop_fade`, `mark_climax`, `scene.post`, `--export`).
+    - Full suite, ruff and mypy pass; suite < 120 s.

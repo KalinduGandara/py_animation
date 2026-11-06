@@ -476,3 +476,106 @@ Pulled ahead of M5 at the user's request (2026-11-06) so a scene can grow its wa
 
 ### FR-503 Renderer polygon primitive — [Stack], [Arch]
 - `Renderer.polygon(points, color)` SHALL fill a convex polygon (either winding) with a one-pixel anti-aliased edge whose coverage reaches half a pixel past the edges, so polygons sharing an edge show no seam. Same calls SHALL give the same bytes.
+
+## M6 part 1 — Upload helpers (seed scoring, labels, loop endings, export pack)
+
+Source: `specs/roadmap.md` §3 items F2, F1, F7, F8 (referenced as **[F2]** etc.), approved by the
+user on 2026-11-06 together with the answers and assumptions G1–G11 in `clarifications.md`.
+
+### FR-601 Scene stats — [F2], [G1]
+- `scene.stat(name, value)` SHALL record a named number for the metadata: `name` a non-empty
+  str, `value` a finite int, float or bool. A later call with the same name SHALL replace the
+  value; names keep first-call order. Bad input SHALL raise `ConfigError` naming `name` or `value`.
+- `scene.stats` SHALL return a copy of the recorded stats (dict, insertion order).
+- Recording a stat SHALL NOT change the simulation, the frames or the audio.
+
+### FR-602 Metadata additions — [F2], [G1], [G2]
+- WHEN the scene recorded at least one stat, THE metadata JSON SHALL contain `"stats"` (name →
+  value) directly after `"sound_triggers"`; otherwise the key set and order SHALL be exactly M4's.
+- `"duration"` SHALL be the rendered length `round(frames / fps, 6)`. A render that is not ended
+  early SHALL keep the configured value.
+
+### FR-603 Batch scoring — [F2], [G3], [G4]
+- `bouncekit batch … --score EXPR` SHALL score every successful job from its metadata with the
+  G3 expression language and write `<out-dir>/ranking.json` (G4), then print the top entry.
+- WHEN `EXPR` does not parse or uses anything outside G3, THE SYSTEM SHALL exit 2 with
+  `error: --score: …` before any job runs.
+- WHEN a job's score cannot be computed, its entry SHALL have `score: null` and an `error`
+  string, rank after every scored job, and the exit code SHALL depend only on job failures.
+- Equal scores SHALL keep planned job order. Without `--score` no ranking file is written.
+
+### FR-604 Keep only the best — [F2], [G4]
+- `--keep-best N` (integer ≥ 1) SHALL require `--score` (else exit 2) and, after ranking, delete
+  the MP4, metadata JSON and export-pack files (FR-611) of every ranked job after position N,
+  setting `kept: false` on those entries and `true` on the rest.
+
+### FR-605 Ball labels — [F1], [G5]
+- `add_ball`, `A.spawn` and `ctx.spawn` SHALL accept `label` (str or `None`), `label_color`
+  (colour or `None` = auto contrast) and `label_scale` (positive finite, default 1.0); bad values
+  SHALL raise `ConfigError` naming the field.
+- WHILE a ball with a non-empty label is alive, THE SYSTEM SHALL draw the label centred on the
+  ball at font size `label_scale × radius`, after the glow layer and before text overlays, in
+  `label_color` or, if `None`, `#111111` when the drawn ball colour's relative luminance > 0.4
+  and `#ffffff` otherwise.
+- WHEN a labelled ball splits, every child SHALL have the parent's `label`, `label_color` and
+  `label_scale`. `Ball.label`, `label_color`, `label_scale` SHALL be readable and settable.
+- Labels SHALL be visual only (no change to physics, events or rng), and a scene without labels
+  SHALL produce the same frame bytes as before M6.
+
+### FR-606 Emoji in text — [F1], [G6]
+- `Renderer.text` (labels and `add_text`) SHALL draw each character the default font lacks with
+  the bundled Noto Emoji font when that font has it, drop U+FE0E/U+FE0F, and keep the line
+  centred on its total advance.
+- Text the default font fully covers SHALL produce the same bytes as before M6.
+- The font and its OFL licence text SHALL ship inside the package (`bouncekit/fonts/`).
+
+### FR-607 Loop-friendly ending — [F7], [G7]
+- `Scene(loop_fade=…)` (seconds, finite, ≥ 0, default 0) SHALL make the rendered MP4 cross-fade
+  its last N frames into frame 0 as in G7, including when `end_after` ends the video early.
+- `loop_fade = 0` SHALL leave frames and audio unchanged; negative or non-finite values SHALL
+  raise `ConfigError` naming `loop_fade`. The frame count SHALL NOT change.
+
+### FR-608 Loop audio fade — [F7], [G8]
+- WHEN `loop_fade > 0` and the render has audio, THE SYSTEM SHALL scale the mix by a linear ramp
+  from 1 at the first sample of the fade window to 0 at the end, before the true-peak limiter.
+
+### FR-609 Climax frame — [F8], [G9]
+- `A.mark_climax()` and `ctx.mark_climax()` SHALL queue a command; applied during frame F it SHALL
+  set the climax to F + 1 (last call wins). `scene.climax_frame` SHALL give the explicit mark,
+  else the frame after the first applied `end_after`, else `None`.
+- After `Scene.frames()`/`render` finish, `scene.climax_image` SHALL hold the RGB24 bytes of the
+  climax frame as drawn (before the loop fade), or of the last frame when there is no climax.
+
+### FR-610 Post text — [F8], [G10]
+- `scene.post(*, title, description="", hashtags=())` SHALL validate and store the post text
+  (G10), raising `ConfigError` naming the field. `scene.post_text()` SHALL return the file text
+  with callables evaluated at call time.
+
+### FR-611 Export pack — [F8], [G11]
+- `bouncekit render … --export` and `bouncekit batch … --export` SHALL write
+  `<stem>_thumb.png` (the climax image, width × height) beside each MP4 and, when the scene called
+  `scene.post`, `<stem>_post.txt`; without `scene.post` the CLI SHALL print
+  `note: no scene.post(...); wrote only the thumbnail`.
+- A failed job SHALL leave no export files. Without `--export` nothing extra is written.
+
+### FR-612 Examples and docs — [F1], [F2], [F7], [F8], [Eng]
+- An example in `examples/` SHALL use labels (with an emoji), `scene.stat`, `loop_fade`,
+  `mark_climax` and `scene.post`, with a test in `tests/test_example.py`.
+- README (API overview and "What you can make") and the `bouncekit-video` skill SHALL describe
+  every M6 feature.
+
+### Non-functional (M6)
+- **NFR-601 Determinism and compatibility**: all M0–M5 tests pass unmodified; scenes that use no
+  M6 feature give identical frame and audio bytes; labels, stats, climax marks and post text
+  change no ball state, event or rng state; the same seed gives the same thumbnail and fade bytes.
+- **NFR-602 Dependencies and licence**: no new runtime dependency; the only new asset is the
+  Noto Emoji font with its SIL OFL 1.1 licence. pytest, ruff and mypy pass; the suite stays
+  < 120 s.
+- **NFR-603 Memory**: the loop-fade delay line holds at most N + 1 frames (N from G7).
+
+### Out of scope for M6 part 1
+- F3–F6, F9, F10; 4:5 and 1:1 crops.
+- Colour emoji, flag pairs and ZWJ emoji sequences (no text shaping).
+- A `relabel` action; label outline, shadow or rotation.
+- Scoring expressions with comparisons, conditionals or function calls other than G3's.
+- Re-ranking existing outputs without rendering.

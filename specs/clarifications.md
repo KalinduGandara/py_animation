@@ -168,3 +168,73 @@ Made by the spec author with the recommended default. The user delegated these; 
 - E22. **`Scene.render(progress=cb)` is the only hook into rendering, and the wall clock is read only by the CLI side.** This is given (wall clock never in simulation). Reason: determinism stays independent of UI timing.
 - E23. **Batch also accepts `--duration`; there is no `--seed` (use `--seeds`).** Reason: short test sweeps need a duration override, and one seed option avoids ambiguity.
 - E24. **The milestone example is `examples/param_sweep.py`** (a ring gap param, a look param, a title and a live counter). Reason: it shows every M4 feature in one script, and its batch output is checkable in a test.
+
+## M6 part 1 — questions and answers (2026-11-06)
+
+Scope (user, 2026-11-06): roadmap items F2 → F1 → F7 → F8 as milestone M6 part 1, then backlog
+videos 1–4. F3–F6, F9, F10 stay unbuilt until asked.
+
+Questions asked, with the user's answers:
+
+1. **Emoji in labels and text**: (a) text only, or (b) bundle the monochrome Noto Emoji font
+   (SIL OFL 1.1, ~2 MB) as a package asset? → **(b)**.
+2. **Export pack crops (4:5, 1:1)**: include or skip? → **skip** (the 9:16 MP4 fits all three
+   platforms).
+3. **Color Wars with 4 teams, win rule**: first team to the target share wins, or eliminate
+   until one remains? → **first to target wins, leader fallback at ~38 s**.
+4. **Loop ending audio**: fade the audio out over the same window? → **yes**.
+
+## M6 assumptions
+
+Made by the spec author with the recommended default (the user delegated these).
+
+- G1. **Scenes report their own numbers with `scene.stat(name, value)`** (finite int/float/bool;
+  last call wins). The metadata JSON gains a `"stats"` object after `"sound_triggers"`, **only
+  when the scene reported a stat**, so M4 metadata (and its exact-key tests) stay unchanged.
+  Reason: generic event counts cannot tell how close a race was.
+- G2. **Metadata `duration` becomes the rendered length, `frames / fps`** (rounded to 6
+  decimals), fixing the caveat that it reported the configured length when `end_after` ended
+  early. Unended renders keep the same value. MP4 bytes are unaffected.
+- G3. **`--score EXPR` is a whitelisted arithmetic expression** parsed with `ast`, never `eval`:
+  numbers, `+ - * / // % **`, unary `+`/`-`, `abs`/`min`/`max`/`round`, names `duration`,
+  `frames`, `seed`, `sound_triggers`, and attributes `stats.<name>`, `events.<kind>`,
+  `params.<name>` (numeric). Higher is better. Syntax errors exit 2 before any job runs; a job
+  whose score cannot be computed (missing stat, division by zero) gets `score: null`, an
+  `error`, ranks last and does not change the exit code.
+- G4. **`ranking.json`** goes in `--out-dir`: a list sorted by score descending (ties: job order)
+  of `{rank, video, seed, params, score, kept}` (+ `error` when unscored). Failed jobs are not
+  listed. `--keep-best N` (needs `--score`, N ≥ 1) deletes the MP4, JSON and export-pack files
+  of every listed job ranked below N and of unscored jobs; `kept` records it.
+- G5. **Labels**: `add_ball`/`A.spawn`/`ctx.spawn` take `label=None`, `label_color=None`,
+  `label_scale=1.0`. The label is drawn centred on the ball at font size
+  `label_scale × radius`, after the glow layer and before text overlays (crisp, never glows).
+  `label_color=None` means auto contrast: near-black on light balls, white on dark (WCAG
+  relative luminance of the drawn colour > 0.4 → `#111111`). Split children copy the parent's
+  label fields; `Ball.label`/`label_color`/`label_scale` are plain settable attributes (visual
+  only). No `relabel` action (no video needs it yet).
+- G6. **Emoji fallback in `Renderer.text`**: per character, the default font is used if it has
+  the glyph, else the bundled Noto Emoji if it has it, else the default font (as before).
+  Variation selectors U+FE0E/U+FE0F are dropped. Text the default font fully covers is drawn
+  exactly as before (same bytes). Flags (regional-indicator pairs) and ZWJ sequences do not
+  combine: freetype does no shaping. The font lives at `src/bouncekit/fonts/NotoEmoji.ttf`
+  with `OFL.txt` beside it.
+- G7. **`Scene(loop_fade=0.0)`**: seconds of cross-fade into frame 0 at the end. With
+  `N = min(round(loop_fade × fps), frames − 1)`, written frame `frames − N + i` (i = 1..N) is
+  `round((1 − t)·frame + t·frame0)` with `t = i / (N + 1)`, so the last frame is close to, not
+  equal to, frame 0. Frames are held in an N-frame delay line because `end_after` can move the
+  end. `0` (default) changes nothing.
+- G8. **Audio fade**: with `loop_fade > 0` the mix is multiplied by a linear ramp from 1 to 0
+  over the samples of the last N frames, before the true-peak limiter. Preview is unaffected
+  (silent and live).
+- G9. **Climax frame**: `A.mark_climax()` / `ctx.mark_climax()` queue a command; when applied
+  during frame F the climax is frame F + 1 (the first frame that shows it). The last call wins.
+  If never marked, the climax is the frame after the first applied `end_after`; else the last
+  frame. Captured from the drawn frame before the loop fade.
+- G10. **`scene.post(*, title, description="", hashtags=())`**: title and description are a str
+  or a callable `f(scene) -> str` evaluated after the render (so they can state the real result).
+  Title 1–100 chars, description ≤ 5000, hashtags are words without spaces (a leading `#` is
+  added if missing). Last call wins.
+- G11. **`--export` on `render` and `batch`** writes `<stem>_thumb.png` (the climax frame,
+  full size) and, if `scene.post` was called, `<stem>_post.txt` (`TITLE`/`DESCRIPTION`/
+  `HASHTAGS` sections). Without `scene.post` the CLI prints a note and writes only the PNG.
+  `Scene.render` still writes only the MP4 (E12); the CLI writes the pack.
