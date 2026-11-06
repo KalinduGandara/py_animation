@@ -54,6 +54,7 @@
 - 2026-11-06: T-501 done (M5 item pulled forward at the user's request for `scenes/fill_the_circle.py`): `ctx.add_circle` + `AddRingCmd` (validated at the call, applied FIFO, refused on ball overlap/tunnelling, spawn event `(ring,)`), `CircleBoundary(space=None)`; tests in tests/test_add_ring.py; README documents it.
 - 2026-11-06: T-502 done (M5 item pulled forward at the user's request so `scenes/fill_the_circle.py` grows a solid jagged wall): `Polygon` (static convex hull, `distance`/`overlaps`), `scene.add_polygon`, `ctx.add_polygon`, `AddRingCmd` generalised to `AddStaticCmd`, `Renderer.polygon` (seam-free AA fill); tests in tests/test_polygon.py; gate passes.
 - 2026-11-06: T-601 done: `scene.stat`/`scene.stats` (validated, last call wins, insertion order), metadata `"stats"` after `sound_triggers` only when stats exist (M4 key tests unchanged), `duration` = rendered `frames / fps` (fixes the end_after caveat); tests in tests/test_stats.py (fixture stats_scene.py); gate passes.
+- 2026-11-06: T-602 done: `scoring.py` (ast whitelist: numbers, + - * / // % **, unary +/-, abs/min/max/round, names duration/frames/seed/sound_triggers, stats./events./params. fields; `ScoreError` per job), `batch --score EXPR` writes `ranking.json` (score desc, ties in job order, unscorable last with error, prints best), `--keep-best N` deletes the rest via `batch.remove_outputs`; bad options exit 2 before any job; tests in tests/test_scoring.py; gate passes.
 
 ## Traceability (requirement -> tests)
 

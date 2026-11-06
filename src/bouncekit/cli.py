@@ -1,6 +1,7 @@
 """Command-line interface: ``bouncekit render``, ``bouncekit preview`` and ``bouncekit batch``."""
 
 import argparse
+import json
 import math
 import runpy
 import sys
@@ -15,6 +16,7 @@ from bouncekit.batch import (
     parse_grid,
     parse_seeds,
     plan_jobs,
+    remove_outputs,
     run_batch,
     run_job,
 )
@@ -23,6 +25,7 @@ from bouncekit.export.ffmpeg import require_ffmpeg
 from bouncekit.progress import Progress
 from bouncekit.render.preview import run_preview
 from bouncekit.scene import Scene
+from bouncekit.scoring import Score, compile_score, rank
 
 DEFAULT_SCALE = 0.45
 ERROR_EXIT = 2
@@ -138,6 +141,11 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     batch.add_argument(
         "--quiet", action="store_true", help="hide per-job 'wrote' lines and the progress bar"
     )
+    batch.add_argument("--score", metavar="EXPR",
+                       help="rank renders by EXPR over their metadata, e.g. "
+                            "'-abs(stats.a - stats.b)'; writes ranking.json")  # fmt: skip
+    batch.add_argument("--keep-best", type=int, metavar="N",
+                       help="with --score: delete all but the N best renders")  # fmt: skip
     return parser
 
 
@@ -156,10 +164,41 @@ def _plan_batch(args: argparse.Namespace, script: str | Path) -> list[Job]:
     )
 
 
+def _plan_score(args: argparse.Namespace) -> Score | None:
+    """Check ``--score``/``--keep-best`` (FR-603, FR-604); ``ConfigError`` names the option."""
+    if args.keep_best is not None:
+        if args.score is None:
+            raise ConfigError("--keep-best needs --score")
+        if args.keep_best < 1:
+            raise ConfigError(f"--keep-best must be an integer >= 1; got {args.keep_best}")
+    return None if args.score is None else compile_score(args.score)
+
+
+def _write_ranking(args: argparse.Namespace, score: Score, results: Sequence[JobResult]) -> None:
+    """Rank the successful jobs, apply ``--keep-best`` and write ``ranking.json`` (FR-603)."""
+    metas = [
+        json.loads(r.out.with_suffix(".json").read_text(encoding="utf-8"))
+        for r in results
+        if r.ok and r.out is not None
+    ]
+    entries = rank(metas, score)
+    if args.keep_best is not None:
+        for entry in entries[args.keep_best :]:
+            entry["kept"] = False
+            remove_outputs(args.out_dir / str(entry["video"]))
+    path = args.out_dir / "ranking.json"
+    path.write_text(json.dumps(entries, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    if entries and entries[0]["score"] is not None:
+        print(f"best: {entries[0]['video']} (score {entries[0]['score']:g}); ranking in {path}")
+    else:
+        print(f"no render could be scored; ranking in {path}")
+
+
 def _run_batch_command(args: argparse.Namespace, script: str | Path) -> int:
     """``bouncekit batch``: plan, check ffmpeg, run the jobs, report; returns the exit code."""
     try:
         jobs = _plan_batch(args, script)
+        score = _plan_score(args)
         require_ffmpeg()
     except BouncekitError as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -192,6 +231,8 @@ def _run_batch_command(args: argparse.Namespace, script: str | Path) -> int:
         bar.close()
     failed = sum(not r.ok for r in results)
     print(f"batch: {total - failed} ok, {failed} failed")
+    if score is not None:
+        _write_ranking(args, score, results)
     return 1 if failed else 0
 
 

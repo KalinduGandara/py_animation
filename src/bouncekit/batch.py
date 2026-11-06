@@ -28,6 +28,7 @@ __all__ = [
     "parse_grid",
     "parse_seeds",
     "plan_jobs",
+    "remove_outputs",
     "run_batch",
     "run_job",
 ]
@@ -174,6 +175,12 @@ def plan_jobs(
     return jobs
 
 
+def remove_outputs(video: Path) -> None:
+    """Delete a render's MP4 and its metadata JSON if they exist."""
+    video.unlink(missing_ok=True)
+    video.with_suffix(".json").unlink(missing_ok=True)
+
+
 def _default_out(job: Job, seed: int) -> Path:
     return job.out_dir / f"{Path(job.script).stem}_seed{seed}{suffix(job.overrides)}.mp4"
 
@@ -224,8 +231,7 @@ def run_job(
         write_metadata(out, data)
     except Exception as exc:
         if out is not None:
-            out.unlink(missing_ok=True)
-            out.with_suffix(".json").unlink(missing_ok=True)
+            remove_outputs(out)
         seconds = round(time.monotonic() - t0, 3)
         return JobResult(job.index, out, False, 0, seconds, f"{type(exc).__name__}: {exc}")
     return JobResult(job.index, out, True, scene.frame, seconds, None)
@@ -280,8 +286,7 @@ def _kill(process: BaseProcess) -> None:
 
 def _crashed(job: Job, out: Path | None, reason: str) -> JobResult:
     if out is not None:
-        out.unlink(missing_ok=True)
-        out.with_suffix(".json").unlink(missing_ok=True)
+        remove_outputs(out)
     return JobResult(job.index, out, False, 0, 0.0, f"worker crashed: {reason}")
 
 

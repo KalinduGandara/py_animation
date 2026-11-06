@@ -262,7 +262,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - A scene ended by `end_after` reports `duration == frames / fps`; an unended one keeps its configured duration.
     - Stats leave events, ball states and rng state unchanged.
 
-- [ ] T-602: `batch --score`, `ranking.json`, `--keep-best`.
+- [x] T-602: `batch --score`, `ranking.json`, `--keep-best`.
   - Requirements: FR-603, FR-604
   - Files: src/bouncekit/scoring.py (new), batch.py, cli.py; tests/test_scoring.py (new)
   - Done when these tests pass:
