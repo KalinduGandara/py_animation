@@ -289,7 +289,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - Split children and spawned balls carry the labels; changing `ball.label` changes the next frame.
     - Labels change no events/ball states/rng; a label-free example scene keeps its frame hashes.
 
-- [ ] T-605: Loop fade (video and audio).
+- [x] T-605: Loop fade (video and audio).
   - Requirements: FR-607, FR-608, NFR-601, NFR-603
   - Files: src/bouncekit/config.py, scene.py, export/audio.py; tests/test_loop_fade.py (new)
   - Done when these tests pass:

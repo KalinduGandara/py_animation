@@ -4,6 +4,7 @@ import math
 import random
 import sys
 import tempfile
+from collections import deque
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import TypeVar, overload
@@ -42,7 +43,7 @@ from bouncekit.config import (
 )
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
-from bouncekit.export.audio import write_wav
+from bouncekit.export.audio import fade_out, write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
 from bouncekit.params import ParamValue, check_default, check_name, parse_value
 from bouncekit.render.base import GlowArc, GlowDisc, Renderer
@@ -101,6 +102,7 @@ class Scene:
         rule_cooldown: float = 0.05,
         max_balls: int = 1000,
         effects: EffectsConfig | None = None,
+        loop_fade: float = 0.0,
     ) -> None:
         """Validate the settings and create an empty world.
 
@@ -108,7 +110,10 @@ class Scene:
         per-pair cooldown of collision rules in seconds (see :meth:`on_collision`).
         ``max_balls`` caps the live balls: ``add_ball`` beyond it raises, and splits or
         spawns beyond it are refused at runtime. ``effects`` defaults to
-        ``EffectsConfig()`` (trail length, glow blur, particle cap).
+        ``EffectsConfig()`` (trail length, glow blur, particle cap). ``loop_fade``
+        (seconds, default 0 = off) cross-fades the last frames of the rendered video
+        into frame 0 and fades the audio out over them, so a replay loops smoothly
+        (FR-607, FR-608).
 
         Raises:
             ConfigError: if any setting is invalid.
@@ -127,6 +132,7 @@ class Scene:
             "rule_cooldown": rule_cooldown,
             "max_balls": max_balls,
             "effects": EffectsConfig() if effects is None else effects,
+            "loop_fade": loop_fade,
         }
         options.update(_overrides)
         self.config: SceneConfig = SceneConfig(**options)  # type: ignore[arg-type]
@@ -753,15 +759,20 @@ class Scene:
     def audio_buffer(self) -> NDArray[np.float32]:
         """Mix the notes triggered so far: float32, shape ``(n, 2)``, 48 kHz.
 
-        ``n`` is ``round(frame * 48000 / fps)`` for the frames simulated so far.
+        ``n`` is ``round(frame * 48000 / fps)`` for the frames simulated so far. Once
+        the video is finished, a ``loop_fade`` ramps the samples of its last N frames
+        down to 0 (FR-608).
         """
         cfg = self.config
-        return mix(
+        buffer = mix(
             self._triggers,
             length=num_samples(self.frame, cfg.fps),
             config=cfg.audio,
             seed=cfg.seed,
         )
+        if cfg.loop_fade > 0 and self.frame >= self.total_frames:
+            buffer = fade_out(buffer, num_samples(self.frame - self._fade_frames(), cfg.fps))
+        return buffer
 
     def add_circle(
         self,
@@ -1092,13 +1103,42 @@ class Scene:
 
         The first frame yielded shows the current state (frame 0 for a new scene);
         frames are produced until ``frame`` reaches ``total_frames``. Nothing is
-        reset, so a scene is meant to be simulated once.
+        reset, so a scene is meant to be simulated once. With ``loop_fade > 0`` the
+        last N frames are cross-faded into frame 0 (FR-607); up to N frames are held
+        back until the end is known, so frames are yielded with that delay.
         """
         renderer = PygameRenderer(self.config.width, self.config.height)
+        if self.config.loop_fade <= 0:
+            while self.frame < self.total_frames:
+                self.draw(renderer)
+                yield renderer.to_rgb_bytes()
+                self.step_frame()
+            return
+        # Loop fade (FR-607): ``end_after`` can move the end, so hold the latest
+        # ``target`` frames until it is known, then blend the last N with frame 0.
+        target = round(self.config.loop_fade * self.config.fps)
+        first: NDArray[np.float32] | None = None
+        held: deque[bytes] = deque()
         while self.frame < self.total_frames:
             self.draw(renderer)
-            yield renderer.to_rgb_bytes()
+            data = renderer.to_rgb_bytes()
+            if first is None:
+                first = np.frombuffer(data, np.uint8).astype(np.float32)
+            held.append(data)
+            if len(held) > target:
+                yield held.popleft()
             self.step_frame()
+        n = self._fade_frames()
+        start = len(held) - n
+        for k, data in enumerate(held):
+            if k < start or first is None:
+                yield data
+            else:
+                yield _blend(data, first, (k - start + 1) / (n + 1))
+
+    def _fade_frames(self) -> int:
+        """Frames in the loop-fade window of the finished video: N of G7 (FR-607)."""
+        return max(0, min(round(self.config.loop_fade * self.config.fps), self.frame - 1))
 
     def render(
         self, out: str | Path, *, progress: Callable[[int, int], None] | None = None
@@ -1179,6 +1219,12 @@ class Scene:
         from bouncekit import cli  # local import: cli imports this module
 
         raise SystemExit(cli.main(sys.argv[1:], default_scene=Path(sys.argv[0])))
+
+
+def _blend(frame: bytes, first: NDArray[np.float32], t: float) -> bytes:
+    """``frame`` moved ``t`` of the way towards ``first`` (RGB24, rounded to nearest)."""
+    a = np.frombuffer(frame, np.uint8).astype(np.float32)
+    return bytes(np.rint(a + (first - a) * np.float32(t)).astype(np.uint8).tobytes())
 
 
 def _check_tag(name: str, tag: object) -> None:

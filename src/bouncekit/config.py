@@ -168,7 +168,8 @@ class SceneConfig:
     ``audio`` holds the sound settings (:class:`AudioConfig`). ``rule_cooldown`` is
     the default per-pair cooldown of collision rules in seconds (FR-204).
     ``max_balls`` caps the number of live balls (FR-205). ``effects`` holds the
-    visual effect settings (:class:`EffectsConfig`).
+    visual effect settings (:class:`EffectsConfig`). ``loop_fade`` is the length in
+    seconds of the rendered ending's cross-fade into frame 0 (0 = off, FR-607).
     """
 
     width: int = 1080
@@ -184,8 +185,10 @@ class SceneConfig:
     rule_cooldown: float = 0.05
     max_balls: int = 1000
     effects: EffectsConfig = field(default_factory=EffectsConfig)
+    loop_fade: float = 0.0
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "loop_fade", _non_negative_number("loop_fade", self.loop_fade))
         if not isinstance(self.effects, EffectsConfig):
             raise ConfigError(f"effects must be an EffectsConfig; got {self.effects!r}")
         if not isinstance(self.audio, AudioConfig):
