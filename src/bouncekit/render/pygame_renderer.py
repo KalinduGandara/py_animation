@@ -2,6 +2,8 @@
 
 import math
 from collections.abc import Callable, Sequence
+from importlib import resources
+from pathlib import Path
 
 import numpy as np
 import pygame
@@ -20,6 +22,11 @@ Distance = Callable[[Floats, Floats], Floats]
 
 GLOW_SCALE = 4
 """The glow layer is drawn and blurred at 1/GLOW_SCALE resolution (NFR-303)."""
+
+EMOJI_FONT = Path(str(resources.files("bouncekit").joinpath("fonts", "NotoEmoji.ttf")))
+"""Monochrome Noto Emoji (SIL OFL 1.1, licence beside it), the text fallback (FR-606)."""
+
+_VARIATION_SELECTORS = str.maketrans("", "", "\ufe0e\ufe0f")
 
 TRAIL_FLOOR = 1 / 4096
 """Subtracted from the float trail layer after each fade so values reach exactly 0.
@@ -48,6 +55,7 @@ class PygameRenderer:
         self._trail_box: Box | None = None  # every non-zero layer pixel is inside
         self._glow: tuple[pygame.Surface, pygame.Surface, pygame.Surface] | None = None
         self._fonts: dict[float, pygame.freetype.Font] = {}  # per size (FR-407)
+        self._emoji_fonts: dict[float, pygame.freetype.Font] = {}  # per size (FR-606)
 
     def clear(self, color: Color) -> None:
         """Fill the whole frame with ``color``."""
@@ -322,23 +330,66 @@ class PygameRenderer:
         return x0, x1, y0, y1, mask, weight
 
     def text(self, text: str, center: Vec, size: float, color: Color) -> None:
-        """Draw one line of text with the default freetype font (FR-407)."""
+        """Draw one line of text with the default freetype font (FR-407).
+
+        Characters the default font lacks are drawn with the bundled emoji font when
+        it has them; variation selectors are dropped (FR-606). A line the default
+        font covers is drawn exactly as before M6.
+        """
+        text = text.translate(_VARIATION_SELECTORS)
         if not text.strip():
             return
-        font = self._fonts.get(size)
+        font = self._font(size)
+        ascent = font.get_sized_ascender(size)
+        descent = font.get_sized_descender(size)  # negative: below the baseline
+        baseline = math.floor(center[1] + (ascent + descent) / 2 + 0.5)  # half up
+        runs = self._runs(text, font, size)
+        advances = [
+            sum(m[4] for m in run_font.get_metrics(run) if m is not None) for run_font, run in runs
+        ]
+        x = math.floor(center[0] - sum(advances) / 2 + 0.5)
+        if len(runs) == 1 and runs[0][0] is font:  # the pre-M6 path, byte for byte
+            font.render_to(self.surface, (x, baseline), text, color, size=size)
+            return
+        pen = 0.0
+        for (run_font, run), advance in zip(runs, advances, strict=True):
+            run_font.render_to(
+                self.surface, (math.floor(x + pen + 0.5), baseline), run, color, size=size
+            )
+            pen += advance
+
+    def _font(self, size: float, *, emoji: bool = False) -> pygame.freetype.Font:
+        """The cached default (or emoji) font at ``size``."""
+        cache = self._emoji_fonts if emoji else self._fonts
+        font = cache.get(size)
         if font is None:
             if not pygame.freetype.get_init():
                 pygame.freetype.init()
-            font = pygame.freetype.Font(None, size)
+            font = pygame.freetype.Font(str(EMOJI_FONT) if emoji else None, size)
             font.antialiased = True
             font.origin = True
-            self._fonts[size] = font
-        advance = sum(m[4] for m in font.get_metrics(text) if m is not None)
-        ascent = font.get_sized_ascender(size)
-        descent = font.get_sized_descender(size)  # negative: below the baseline
-        x = math.floor(center[0] - advance / 2 + 0.5)
-        baseline = math.floor(center[1] + (ascent + descent) / 2 + 0.5)  # half up
-        font.render_to(self.surface, (x, baseline), text, color, size=size)
+            cache[size] = font
+        return font
+
+    def _runs(
+        self, text: str, font: pygame.freetype.Font, size: float
+    ) -> list[tuple[pygame.freetype.Font, str]]:
+        """Split ``text`` into runs of one font: default, else emoji if it has the glyph."""
+        # Missing glyphs give None at runtime, though the stubs say otherwise.
+        metrics: list[object | None] = list(font.get_metrics(text))
+        if all(m is not None for m in metrics):
+            return [(font, text)]
+        emoji = self._font(size, emoji=True)
+        runs: list[tuple[pygame.freetype.Font, str]] = []
+        for ch, metric in zip(text, metrics, strict=True):
+            chosen = font
+            if metric is None and emoji.get_metrics(ch)[0] is not None:
+                chosen = emoji
+            if runs and runs[-1][0] is chosen:
+                runs[-1] = (chosen, runs[-1][1] + ch)
+            else:
+                runs.append((chosen, ch))
+        return runs
 
     def to_rgb_bytes(self) -> bytes:
         """Return the frame as packed RGB24 bytes (``width * height * 3``)."""

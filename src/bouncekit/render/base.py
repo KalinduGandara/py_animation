@@ -114,7 +114,9 @@ class Renderer(Protocol):
 
         The line's advance box is centred horizontally on ``center.x`` and its line box
         (ascender to descender, the font's sized height) vertically on ``center.y``.
-        Empty or whitespace-only text draws nothing.
+        Empty or whitespace-only text draws nothing. Characters the default font lacks
+        fall back to the bundled monochrome emoji font; U+FE0E/U+FE0F are dropped
+        (FR-606).
         """
         ...
 

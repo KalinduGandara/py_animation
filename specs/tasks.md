@@ -271,7 +271,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - A job missing a stat gets `score: null` + `error`, ranks last, exit code 0.
     - `--keep-best 1` leaves only the best job's MP4/JSON and marks `kept`; `--keep-best` without `--score` or with N < 1 exits 2.
 
-- [ ] T-603: Bundled emoji font and emoji fallback in `Renderer.text`.
+- [x] T-603: Bundled emoji font and emoji fallback in `Renderer.text`.
   - Requirements: FR-606, NFR-601, NFR-602
   - Files: src/bouncekit/fonts/NotoEmoji.ttf + OFL.txt (new), render/pygame_renderer.py, render/base.py (docstring); tests/test_emoji.py (new)
   - Done when these tests pass:
