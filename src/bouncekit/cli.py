@@ -22,6 +22,7 @@ from bouncekit.batch import (
 )
 from bouncekit.errors import BouncekitError, ConfigError, SceneLoadError
 from bouncekit.export.ffmpeg import require_ffmpeg
+from bouncekit.export.pack import pack_paths
 from bouncekit.progress import Progress
 from bouncekit.render.preview import run_preview
 from bouncekit.scene import Scene
@@ -115,6 +116,9 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
     render.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                         help="override a scene.param (repeatable)")  # fmt: skip
     render.add_argument("--quiet", action="store_true", help="hide the progress bar")
+    render.add_argument("--export", action="store_true",
+                        help="also write <stem>_thumb.png (climax frame) and "
+                             "<stem>_post.txt (scene.post)")  # fmt: skip
 
     preview = sub.add_parser("preview", help="play the scene in a window")
     preview.add_argument("scene", **scene_kwargs)  # type: ignore[arg-type]
@@ -146,6 +150,8 @@ def _build_parser(scene_optional: bool) -> argparse.ArgumentParser:
                             "'-abs(stats.a - stats.b)'; writes ranking.json")  # fmt: skip
     batch.add_argument("--keep-best", type=int, metavar="N",
                        help="with --score: delete all but the N best renders")  # fmt: skip
+    batch.add_argument("--export", action="store_true",
+                       help="also write a thumbnail and post text per render")  # fmt: skip
     return parser
 
 
@@ -160,7 +166,13 @@ def _plan_batch(args: argparse.Namespace, script: str | Path) -> list[Job]:
     if duration is not None and not (math.isfinite(duration) and duration > 0):
         raise ConfigError(f"--duration must be a positive finite number; got {duration!r}")
     return plan_jobs(
-        script, seeds=seeds, sets=sets, grid=grid, duration=duration, out_dir=args.out_dir
+        script,
+        seeds=seeds,
+        sets=sets,
+        grid=grid,
+        duration=duration,
+        out_dir=args.out_dir,
+        export=args.export,
     )
 
 
@@ -231,9 +243,17 @@ def _run_batch_command(args: argparse.Namespace, script: str | Path) -> int:
         bar.close()
     failed = sum(not r.ok for r in results)
     print(f"batch: {total - failed} ok, {failed} failed")
+    if args.export:
+        _note_missing_post([r.out for r in results if r.ok and r.out is not None])
     if score is not None:
         _write_ranking(args, score, results)
     return 1 if failed else 0
+
+
+def _note_missing_post(videos: Sequence[Path]) -> None:
+    """Tell the user when ``--export`` had no ``scene.post`` text to write (FR-611)."""
+    if any(not pack_paths(video)[1].exists() for video in videos):
+        print("note: no scene.post(...); wrote only the thumbnail")
 
 
 def _frame_progress(bar: Progress) -> Callable[[int, int], None]:
@@ -274,6 +294,7 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
             overrides=tuple(overrides),
             out_dir=Path("out"),
             out=args.out,
+            export=args.export,
         )
         bar = Progress(0, label="render", unit="frames", enabled=False if args.quiet else None)
         try:
@@ -284,6 +305,8 @@ def main(argv: Sequence[str] | None = None, default_scene: Path | None = None) -
             print(f"error: {result.error}", file=sys.stderr)
             return ERROR_EXIT
         print(f"wrote {result.out} ({result.frames} frames)")
+        if args.export and result.out is not None:
+            _note_missing_post([result.out])
         return 0
     params = dict(overrides)
 

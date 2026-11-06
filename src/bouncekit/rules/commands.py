@@ -28,6 +28,7 @@ __all__ = [
     "Command",
     "DestroyCmd",
     "EndCmd",
+    "MarkClimaxCmd",
     "FlashCmd",
     "RecolorCmd",
     "ResizeCmd",
@@ -86,6 +87,11 @@ class SpawnCmd:
 
 
 @dataclass(frozen=True, eq=False)
+class MarkClimaxCmd:
+    """Make the next drawn frame the climax (thumbnail, FR-609)."""
+
+
+@dataclass(frozen=True, eq=False)
 class EndCmd:
     """End the video ``frames`` frames after the frames simulated so far (FR-209)."""
 
@@ -139,6 +145,7 @@ type Command = (
     | SplitCmd
     | SpawnCmd
     | EndCmd
+    | MarkClimaxCmd
     | RecolorCmd
     | ResizeCmd
     | VelocityCmd
@@ -156,6 +163,10 @@ def apply(scene: "Scene", cmd: Command) -> None:
         _split(scene, cmd)
     elif isinstance(cmd, EndCmd):
         scene.total_frames = min(scene.total_frames, scene._frames_done + cmd.frames)
+        if scene._end_climax is None:  # default climax: the frame after the first end
+            scene._end_climax = scene._frames_done
+    elif isinstance(cmd, MarkClimaxCmd):
+        scene._climax_mark = scene._frames_done  # the next drawn frame; last call wins
     elif isinstance(cmd, RecolorCmd):
         if isinstance(cmd.obj, Ball):
             if cmd.obj.alive:

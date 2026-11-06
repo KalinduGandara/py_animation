@@ -1,6 +1,6 @@
 """Built-in rule actions (FR-104, FR-206..FR-210, FR-305).
 
-play, destroy, split, spawn, recolor, resize, set_velocity, flash, end_after and
+play, destroy, split, spawn, recolor, resize, set_velocity, flash, end_after, mark_climax and
 particles.
 
 Actions are immutable values compared by identity. When a rule fires, each action's
@@ -40,6 +40,7 @@ __all__ = [
     "Action",
     "Destroy",
     "EndAfter",
+    "MarkClimax",
     "Flash",
     "Handler",
     "Particles",
@@ -52,6 +53,7 @@ __all__ = [
     "Target",
     "destroy",
     "end_after",
+    "mark_climax",
     "flash",
     "particles",
     "play",
@@ -164,6 +166,15 @@ class EndAfter:
 
 
 @dataclass(frozen=True, eq=False)
+class MarkClimax:
+    """Mark the next drawn frame as the climax (see :func:`mark_climax`)."""
+
+    def run(self, ctx: "ActionContext") -> None:
+        """Queue the mark."""
+        ctx.mark_climax()
+
+
+@dataclass(frozen=True, eq=False)
 class Recolor:
     """Set the target's base colour after dispatch (see :func:`recolor`)."""
 
@@ -244,7 +255,17 @@ class Particles:
 
 
 type Action = (
-    Play | Destroy | Split | Spawn | Recolor | Resize | SetVelocity | Flash | EndAfter | Particles
+    Play
+    | Destroy
+    | Split
+    | Spawn
+    | Recolor
+    | Resize
+    | SetVelocity
+    | Flash
+    | EndAfter
+    | MarkClimax
+    | Particles
 )
 """Any built-in action."""
 
@@ -261,6 +282,7 @@ ACTION_TYPES: tuple[type, ...] = (
     SetVelocity,
     Flash,
     EndAfter,
+    MarkClimax,
     Particles,
 )
 
@@ -512,6 +534,16 @@ def flash(target: Target = "a", *, seconds: float = 0.08, color: ColorLike = "#f
         seconds=_non_negative_number("seconds", seconds),
         color=parse_color(color),
     )
+
+
+def mark_climax() -> MarkClimax:
+    """Return an action that makes the next drawn frame the climax (FR-609).
+
+    ``bouncekit render --export`` saves the climax frame as the thumbnail. The last
+    mark wins; without one, the frame after the first ``end_after`` is used, else the
+    last frame. Visual/export only: the simulation never reads it.
+    """
+    return MarkClimax()
 
 
 def end_after(seconds: float) -> EndAfter:

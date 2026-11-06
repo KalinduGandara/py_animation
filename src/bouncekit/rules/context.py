@@ -39,6 +39,7 @@ from bouncekit.rules.commands import (
     DestroyCmd,
     EndCmd,
     FlashCmd,
+    MarkClimaxCmd,
     RecolorCmd,
     ResizeCmd,
     SpawnCmd,
@@ -433,6 +434,14 @@ class ActionContext:
         action = end_after(seconds)
         frames = round(action.seconds * self.scene.config.fps)
         self.scene._queue.append(EndCmd(frames))
+
+    def mark_climax(self) -> None:
+        """Queue marking the next drawn frame as the climax (FR-609).
+
+        The climax frame becomes the thumbnail of ``render --export``. The last mark
+        wins; without one, the frame after the first ``end_after`` is used.
+        """
+        self.scene._queue.append(MarkClimaxCmd())
 
 
 def _check_object(name: str, obj: object) -> None:

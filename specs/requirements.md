@@ -544,7 +544,8 @@ user on 2026-11-06 together with the answers and assumptions G1–G11 in `clarif
   set the climax to F + 1 (last call wins). `scene.climax_frame` SHALL give the explicit mark,
   else the frame after the first applied `end_after`, else `None`.
 - After `Scene.frames()`/`render` finish, `scene.climax_image` SHALL hold the RGB24 bytes of the
-  climax frame as drawn (before the loop fade), or of the last frame when there is no climax.
+  climax frame as drawn (before the loop fade), or of the last frame when there is no climax
+  or the climax frame is never drawn (e.g. `end_after(0)` ends the video first).
 
 ### FR-610 Post text — [F8], [G10]
 - `scene.post(*, title, description="", hashtags=())` SHALL validate and store the post text

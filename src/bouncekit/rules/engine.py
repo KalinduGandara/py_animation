@@ -13,6 +13,7 @@ from bouncekit.actions import (
     EndAfter,
     Flash,
     Handler,
+    MarkClimax,
     Particles,
     Play,
     Recolor,
@@ -32,7 +33,18 @@ if TYPE_CHECKING:
 __all__ = ["Rule", "RuleEngine", "RuleKind"]
 
 # Built-in actions gated by rule cooldowns (every one except Play).
-_QUEUEING = (Destroy, Split, Spawn, Recolor, Resize, SetVelocity, Flash, EndAfter, Particles)
+_QUEUEING = (
+    Destroy,
+    Split,
+    Spawn,
+    Recolor,
+    Resize,
+    SetVelocity,
+    Flash,
+    EndAfter,
+    MarkClimax,
+    Particles,
+)
 
 type RuleKind = Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]
 

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from bouncekit.errors import ConfigError
 from bouncekit.export.metadata import build_metadata, write_metadata
+from bouncekit.export.pack import pack_paths, write_pack
 from bouncekit.params import suffix
 
 __all__ = [
@@ -102,7 +103,8 @@ class Job:
     ``seed``/``duration`` of ``None`` keep the script's values. ``out`` of
     ``None`` names the MP4 ``<out_dir>/<stem>_seed<seed><suffix>.mp4`` once the
     seed is known (after loading). ``script`` is the path as given on the CLI; it is
-    recorded verbatim in the metadata (FR-405).
+    recorded verbatim in the metadata (FR-405). ``export`` also writes the export
+    pack (thumbnail and post text, FR-611) beside the MP4.
     """
 
     index: int
@@ -112,6 +114,7 @@ class Job:
     overrides: tuple[tuple[str, str], ...]
     out_dir: Path
     out: Path | None
+    export: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +140,7 @@ def plan_jobs(
     grid: Sequence[tuple[str, Sequence[str]]],
     duration: float | None,
     out_dir: str | Path,
+    export: bool = False,
 ) -> list[Job]:
     """Plan the batch: seeds (outermost) x the grid product (last grid varies fastest).
 
@@ -171,14 +175,14 @@ def plan_jobs(
                 )
             seen[(seed, tail)] = index
             out = None if seed is None else folder / f"{path.stem}_seed{seed}{tail}.mp4"
-            jobs.append(Job(index, script, seed, duration, tuple(overrides), folder, out))
+            jobs.append(Job(index, script, seed, duration, tuple(overrides), folder, out, export))
     return jobs
 
 
 def remove_outputs(video: Path) -> None:
-    """Delete a render's MP4 and its metadata JSON if they exist."""
-    video.unlink(missing_ok=True)
-    video.with_suffix(".json").unlink(missing_ok=True)
+    """Delete a render's MP4, metadata JSON and export pack files if they exist."""
+    for path in (video, video.with_suffix(".json"), *pack_paths(video)):
+        path.unlink(missing_ok=True)
 
 
 def _default_out(job: Job, seed: int) -> Path:
@@ -229,6 +233,8 @@ def run_job(
         seconds = round(time.monotonic() - t0, 3)
         data = build_metadata(scene, script=str(job.script), video=out, render_seconds=seconds)
         write_metadata(out, data)
+        if job.export:
+            write_pack(scene, out)
     except Exception as exc:
         if out is not None:
             remove_outputs(out)

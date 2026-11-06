@@ -45,6 +45,7 @@ from bouncekit.errors import ConfigError
 from bouncekit.events import Event, EventRecorder, WorldObject
 from bouncekit.export.audio import fade_out, write_wav
 from bouncekit.export.ffmpeg import FfmpegWriter, mux, require_ffmpeg
+from bouncekit.export.post import Post, format_post, make_post
 from bouncekit.params import ParamValue, check_default, check_name, parse_value
 from bouncekit.render.base import GlowArc, GlowDisc, Renderer
 from bouncekit.render.effects import Effects, TrailBall
@@ -179,6 +180,57 @@ class Scene:
         self._params: dict[str, tuple[ParamValue, ParamValue]] = {}  # name -> (default, value)
         self._texts: list[Text] = []  # overlays in add_text order (FR-406)
         self._stats: dict[str, int | float | bool] = {}  # metadata only (FR-601)
+        # Export only (FR-609, FR-610): never read by the simulation.
+        self._climax_mark: int | None = None  # set by MarkClimaxCmd
+        self._end_climax: int | None = None  # set by the first applied EndCmd
+        self._shot: tuple[int, bytes] | None = None  # (frame, RGB24) of the climax
+        self._last_shot: bytes | None = None
+        self._post: Post | None = None
+
+    @property
+    def climax_frame(self) -> int | None:
+        """The climax frame: the last ``mark_climax``, else the frame after the first
+        applied ``end_after``, else ``None`` (FR-609)."""
+        return self._climax_mark if self._climax_mark is not None else self._end_climax
+
+    @property
+    def climax_image(self) -> bytes | None:
+        """RGB24 bytes of the climax frame as drawn (before any loop fade), or of the
+        last drawn frame when there is no climax or it was never drawn; ``None``
+        before any frame is drawn by :meth:`frames` (FR-609)."""
+        shot = self._shot
+        if shot is not None and shot[0] == self.climax_frame:
+            return shot[1]
+        return self._last_shot
+
+    def _capture(self, data: bytes) -> None:
+        """Keep the drawn frame if it is the climax, and as the latest frame."""
+        if self.frame == self.climax_frame:
+            self._shot = (self.frame, data)
+        self._last_shot = data
+
+    def post(
+        self,
+        *,
+        title: "str | Callable[[Scene], str]",
+        description: "str | Callable[[Scene], str]" = "",
+        hashtags: Iterable[str] = (),
+    ) -> None:
+        """Set the upload text written by ``render --export`` as ``<stem>_post.txt`` (FR-610).
+
+        ``title`` (1-100 characters) and ``description`` (up to 5000) are a str or a
+        callable ``f(scene) -> str`` evaluated after the render, so they can state the
+        real result. ``hashtags`` are single words; a leading ``#`` is added if
+        missing. The last call wins.
+
+        Raises:
+            ConfigError: naming the bad field.
+        """
+        self._post = make_post(title=title, description=description, hashtags=hashtags)
+
+    def post_text(self) -> str | None:
+        """The post file text with callables evaluated now, or ``None`` without ``post``."""
+        return None if self._post is None else format_post(self._post, self)
 
     def stat(self, name: str, value: float | bool) -> None:
         """Record a named number for the render metadata (``"stats"``, FR-601).
@@ -1111,7 +1163,9 @@ class Scene:
         if self.config.loop_fade <= 0:
             while self.frame < self.total_frames:
                 self.draw(renderer)
-                yield renderer.to_rgb_bytes()
+                data = renderer.to_rgb_bytes()
+                self._capture(data)
+                yield data
                 self.step_frame()
             return
         # Loop fade (FR-607): ``end_after`` can move the end, so hold the latest
@@ -1122,6 +1176,7 @@ class Scene:
         while self.frame < self.total_frames:
             self.draw(renderer)
             data = renderer.to_rgb_bytes()
+            self._capture(data)
             if first is None:
                 first = np.frombuffer(data, np.uint8).astype(np.float32)
             held.append(data)

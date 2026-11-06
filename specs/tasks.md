@@ -298,7 +298,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - The audio buffer used for the mux is ramped to 0 over the window; `loop_fade=0` keeps frame and audio bytes.
     - The delay line never holds more than N + 1 frames.
 
-- [ ] T-606: Climax frame, `scene.post`, `--export` pack.
+- [x] T-606: Climax frame, `scene.post`, `--export` pack.
   - Requirements: FR-609, FR-610, FR-611
   - Files: src/bouncekit/scene.py, rules/commands.py, rules/context.py, actions.py, export/post.py (new), export/pack.py (new), batch.py, cli.py, scoring.py (keep-best deletes pack files); tests/test_export_pack.py (new)
   - Done when these tests pass:
