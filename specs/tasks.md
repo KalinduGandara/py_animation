@@ -228,3 +228,15 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - The README test checks that the M4 section mentions `scene.param`, `--set`, `bouncekit batch`, `--seeds`, `--grid`, `--jobs`, `metadata`/`.json`, `add_text` and `--quiet`.
     - `uv run bouncekit render examples/param_sweep.py` succeeds at full size, and all earlier examples still render.
     - The full suite runs in < 120 s.
+
+## M5 (early) — Rings added by rules
+
+- [x] T-501: `ctx.add_circle` queues a ring added after dispatch.
+  - Requirements: FR-501, NFR-202
+  - Files: src/bouncekit/world/circle.py, rules/commands.py, rules/context.py, scene.py, README.md; tests/test_add_ring.py (new)
+  - Done when these tests pass:
+    - The ring is not in `objects` and not `alive` until commands are applied; then it is, with one `spawn` event `(ring,)`.
+    - A ball bounces off a runtime solid disc and a `ball`/`lump` collision rule fires with it.
+    - A ring overlapping a live ball, or one a live ball could tunnel through, is refused without an error; destroying it is a no-op.
+    - Bad options raise `ConfigError` at the call.
+    - A scene adding rings from a collision rule gives identical events on two runs.

@@ -458,3 +458,13 @@ Terms: a **param** is a named value a script declares with `scene.param(...)`. A
 - A metadata schema version or the full event log in the JSON.
 - Thumbnails or cover images.
 - Rube Goldberg primitives, camera and segments (M5).
+
+## M5 (early) — Rings added by rules
+
+Pulled ahead of M5 at the user's request (2026-11-06) so a scene can grow its walls where a ball hits. Only this item; the rest of M5 (segments, polygons, joints, camera) stays out of scope.
+
+### FR-501 Add a ring at runtime — [M5], [API], [Phys]
+- `ctx.add_circle(*, center, radius, thickness=8.0, color="#ffffff", gap_degrees=0.0, angular_velocity=0.0, segments=128, elasticity=1.0, tags=(), glow=0.0) -> CircleBoundary` SHALL take the options of `scene.add_circle`, validate them at the call (raising `ConfigError` naming the field) and queue the ring; it SHALL NOT touch the space during dispatch.
+- The returned handle's `alive` SHALL be `False` until the queued command is applied (FIFO, after dispatch). Then the ring SHALL join the space, `objects`, collisions and rules like any ring, and a `spawn` event with `objects == (ring,)`, `speed == 0.0`, `position == center` SHALL be logged.
+- WHEN a live ball overlaps the ring's band (`|d − radius| < thickness/2 + ball.radius`, gap ignored) or could tunnel through it (FR-202 tunnelling rule), THE SYSTEM SHALL refuse the ring silently: not added, no event, handle stays not `alive` (NFR-202). Destroying a refused handle is a no-op.
+- A ring with `thickness ≥ 2 × radius` is a solid disc of radius `radius + thickness/2` (physics and drawing).

@@ -4,7 +4,8 @@ Handlers never touch the physics space; they append commands to the scene's
 queue. ``apply`` runs them in the window after dispatch and before the next
 ``space.step``. A command whose target is no longer alive is skipped silently.
 Split, spawn and resize commands that would exceed the ball cap or let a ball
-tunnel through a ring are refused as a whole, without an error (C8).
+tunnel through a ring are refused as a whole, without an error (C8). An added ring
+is refused the same way if a live ball overlaps it or could tunnel through it (FR-501).
 """
 
 import math
@@ -20,6 +21,7 @@ if TYPE_CHECKING:
     from bouncekit.scene import Scene
 
 __all__ = [
+    "AddRingCmd",
     "BallSpec",
     "Command",
     "DestroyCmd",
@@ -120,8 +122,23 @@ class FlashCmd:
     frames: int
 
 
+@dataclass(frozen=True, eq=False)
+class AddRingCmd:
+    """Add ``ring`` (built, not yet in the space) to the scene (FR-501)."""
+
+    ring: CircleBoundary
+
+
 type Command = (
-    DestroyCmd | SplitCmd | SpawnCmd | EndCmd | RecolorCmd | ResizeCmd | VelocityCmd | FlashCmd
+    DestroyCmd
+    | SplitCmd
+    | SpawnCmd
+    | EndCmd
+    | RecolorCmd
+    | ResizeCmd
+    | VelocityCmd
+    | FlashCmd
+    | AddRingCmd
 )
 
 
@@ -144,6 +161,8 @@ def apply(scene: "Scene", cmd: Command) -> None:
         _resize(scene, cmd)
     elif isinstance(cmd, VelocityCmd):
         _set_velocity(scene, cmd)
+    elif isinstance(cmd, AddRingCmd):
+        _add_ring(scene, cmd)
     elif isinstance(cmd, FlashCmd):
         if cmd.obj.alive:
             # Starts at the next drawn frame: the frame count once the current frame completes.
@@ -288,3 +307,21 @@ def _set_velocity(scene: "Scene", cmd: VelocityCmd) -> None:
     ball.clamp_speed(scene.config.max_speed)
     if ball.constant_speed:
         ball.target_speed = math.hypot(*ball.velocity)
+
+
+def _add_ring(scene: "Scene", cmd: AddRingCmd) -> None:
+    """Add the ring unless a live ball overlaps its band or could tunnel through it.
+
+    The band is ``radius ± thickness / 2`` around the centre, treated as a full
+    circle (any gap is ignored), so the check is conservative.
+    """
+    ring = cmd.ring
+    cx, cy = ring.center
+    half = ring.thickness / 2
+    for ball in scene._balls:
+        x, y = ball.position
+        if abs(math.hypot(x - cx, y - cy) - ring.radius) < half + ball.radius:
+            return
+        if scene._tunnels(ball.radius, ring):
+            return
+    scene._add_ring(ring)

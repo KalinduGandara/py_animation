@@ -31,7 +31,7 @@ class CircleBoundary:
 
     def __init__(
         self,
-        space: pymunk.Space,
+        space: pymunk.Space | None,
         *,
         center: Vec,
         radius: float,
@@ -45,6 +45,9 @@ class CircleBoundary:
         glow: float | bool = 0.0,
     ) -> None:
         """Validate the options, build the segments and add them to ``space``.
+
+        With ``space=None`` the ring is built but not added and stays not ``alive``
+        until its scene adds it (a ring queued by ``ctx.add_circle``, FR-501).
 
         Raises:
             ConfigError: if any option is invalid.
@@ -69,9 +72,11 @@ class CircleBoundary:
         self.body.angular_velocity = math.radians(spin)
         self._segment_count = segments
         self.shapes: list[pymunk.Segment] = self._build_segments(segments, elasticity_value)
-        space.add(self.body, *self.shapes)
-        self.alive: bool = True
-        """``False`` once the ring has been destroyed (removed from its scene)."""
+        if space is not None:
+            space.add(self.body, *self.shapes)
+        self.alive: bool = space is not None
+        """``True`` while the ring is in its scene (``False`` before it is added or once
+        destroyed)."""
         self.glow: float = glow_value
         """Glow intensity in [0, 4], 0 = no glow (FR-304); visual only."""
 

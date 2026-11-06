@@ -124,6 +124,10 @@ Built-in actions (`from bouncekit import actions as A`; `target="a"` by default,
 `time` and the matching methods: `ctx.destroy(obj)`, `ctx.split(...)`, `ctx.spawn(...)`,
 `ctx.recolor`, `ctx.resize`, `ctx.set_velocity`, `ctx.flash`, `ctx.play(source)`,
 `ctx.end_after(seconds)`. Queued commands on an object that is already gone are skipped.
+`ctx.add_circle(center=, radius=, ...)` (same options as `scene.add_circle`) queues a ring that
+joins the scene after dispatch (its handle's `alive` is `False` until then) and logs a spawn
+event; it is refused silently if a live ball overlaps it or could tunnel through it. A ring with
+`thickness >= 2 * radius` is a solid disc, e.g. a lump stuck where a ball hit.
 
 - **Cooldowns:** a collision rule skips its non-play handlers for a pair that fired
   less than `cooldown` seconds ago (default `Scene(rule_cooldown=0.05)`); `object_cooldown`

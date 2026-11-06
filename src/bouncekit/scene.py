@@ -701,6 +701,18 @@ class Scene:
         self._cascade.append(ev)
         return ball
 
+    def _add_ring(self, ring: CircleBoundary) -> None:
+        """Add a built ring now (command application) and log its spawn event (FR-501)."""
+        self.space.add(ring.body, *ring.shapes)
+        ring.alive = True
+        self._register_object(ring, ring.shapes)
+        self._rings.append(ring)
+        ev = Event(
+            "spawn", self._step, self._sim_frame, self._step / self._rate, (ring,), 0.0, ring.center
+        )
+        self._events.append(ev)
+        self._cascade.append(ev)
+
     def _inherit(self, parent: Ball, child: Ball) -> None:
         """Copy ``parent``'s rule cooldown and note retrigger timestamps to ``child`` (C7)."""
         self._engine.inherit(self._indices[parent], self._indices[child])

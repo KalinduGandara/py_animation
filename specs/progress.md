@@ -51,6 +51,7 @@
 - 2026-10-24: T-404 done: `Renderer.text` + `PygameRenderer.text` (freetype default font, per-size cache, blank no-op), `text.py` (`Text`, `make_text`, `visible`), `Scene.add_text`/`texts`, text drawn after glow with multi-line layout and callable text; tests in tests/test_text.py; gate passes. Deviation: vertical centring uses font ascender+descender (excl. line gap) with half-up rounding so the ink of "Hi" is within 3 px of centre.
 - 2026-10-24: T-405 done: `examples/param_sweep.py` (params gap/speed/hue_step, timed title, callable counter, escape+spawn+sound), README M4 section, CLAUDE.md already listed M4 commands; tests in tests/test_example.py; full render 1200 frames in 22.6 s, 4-job batch (2 s each, --jobs 2) in 6.0 s, all earlier examples still render; gate passes.
 - 2026-10-24: M4 review fixes: (1) FR-404 a dying worker no longer breaks the batch: `run_batch` runs each job in its own spawned process (own process group) instead of a `ProcessPoolExecutor`, so only that job fails, its ffmpeg is killed and its MP4/JSON deleted; (2) FR-405 `"scene"` is the script path as given (CLI `type=str`, `Job.script` kept verbatim); (3) FR-409 `param_sweep.py` seeds the first ball's direction and ticks on ring hits, so short sweeps differ by seed and have sound; (4) FR-404 a crashed worker's MP4 name is known once its script creates the Scene (`load_scene(on_seed=)` → `run_job(on_out=)` → pipe), so the `FAILED <mp4>` line and cleanup work with `--seeds` omitted. Regression tests: test_batch.py::test_dead_worker_*, test_metadata.py::test_metadata_scene_is_script_path_as_given, test_example.py::test_param_sweep_short_sweep_varies_by_seed_and_has_sound (fixture dying_scene.py); 937 tests pass; gate passes.
+- 2026-11-06: T-501 done (M5 item pulled forward at the user's request for `scenes/fill_the_circle.py`): `ctx.add_circle` + `AddRingCmd` (validated at the call, applied FIFO, refused on ball overlap/tunnelling, spawn event `(ring,)`), `CircleBoundary(space=None)`; tests in tests/test_add_ring.py; README documents it.
 
 ## Traceability (requirement -> tests)
 
@@ -114,7 +115,8 @@
 | FR-311 / NFR-305 (example) | test_example.py: test_midi_melody_example_layout, test_midi_melody_render_has_stereo_aac, test_midi_melody_audio_is_stereo_and_triggers_follow_melody |
 | FR-409 / NFR-403 (example, docs) | test_example.py: test_param_sweep_declares_params_and_overlays, test_param_sweep_batch_writes_named_outputs, test_readme_covers_m4 |
 | NFR-301 / NFR-303 (example, docs) | test_example.py::test_readme_covers_m3; tests/test_perf.py |
+| FR-501 (runtime rings) | tests/test_add_ring.py |
 
 ## Status
 
-M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 complete: T-401..T-405 done.
+M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 complete: T-401..T-405 done. M5: T-501 (runtime rings) done early; the rest of M5 not started.

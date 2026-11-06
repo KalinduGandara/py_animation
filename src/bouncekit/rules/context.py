@@ -25,6 +25,7 @@ from bouncekit.colors import (
     BySpeed,
     ColorLike,
     ColorSpec,
+    Fixed,
     HueCycle,
     color_source,
     ring_color,
@@ -33,6 +34,7 @@ from bouncekit.config import Vec, _vec
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, WorldObject
 from bouncekit.rules.commands import (
+    AddRingCmd,
     BallSpec,
     DestroyCmd,
     EndCmd,
@@ -204,6 +206,47 @@ class ActionContext:
             fn: Callable[[ActionContext], object] = value
             return fn(self)
         return value
+
+    def add_circle(
+        self,
+        *,
+        center: Vec,
+        radius: float,
+        thickness: float = 8.0,
+        color: ColorLike | Fixed = "#ffffff",
+        gap_degrees: float = 0.0,
+        angular_velocity: float = 0.0,
+        segments: int = 128,
+        elasticity: float = 1.0,
+        tags: Iterable[str] = (),
+        glow: float | bool = 0.0,
+    ) -> CircleBoundary:
+        """Queue adding a ring; options as ``scene.add_circle`` (FR-501).
+
+        The ring is built and validated now and added after dispatch; until then its
+        ``alive`` is ``False``. It is refused (never added, no error) when a live ball
+        overlaps its band or could tunnel through it. A ring with
+        ``thickness >= 2 * radius`` is a solid disc of radius ``radius + thickness / 2``.
+        A spawn event ``(ring,)`` follows when it is added.
+
+        Raises:
+            ConfigError: if any option is invalid.
+        """
+        ring = CircleBoundary(
+            None,
+            center=center,
+            radius=radius,
+            thickness=thickness,
+            color=color,
+            gap_degrees=gap_degrees,
+            angular_velocity=angular_velocity,
+            segments=segments,
+            elasticity=elasticity,
+            tags=tags,
+            glow=glow,
+        )
+        self.scene._queue.append(AddRingCmd(ring))
+        return ring
 
     def recolor(self, obj: WorldObject, color: ColorSpec) -> None:
         """Queue setting the base colour of ``obj`` (a ball or ring) (FR-210, FR-306).

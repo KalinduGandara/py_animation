@@ -1161,3 +1161,10 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 | Line layout | done in `Scene`, fixed line height `round(1.2 × size)` px | renderer-provided metrics (extends the protocol for one number) |
 | Progress | own 40-line `Progress` class on stderr | `tqdm`/`rich` (new runtime dependency) |
 | Batch progress unit | jobs (plus per-job lines) | frames across all jobs (totals unknown until each script is loaded; needs cross-process queues) |
+
+## M5 (early) — Rings added by rules (FR-501)
+
+- `CircleBoundary(space=None, ...)` builds and validates a ring without adding it (`alive=False`); `scene.add_circle` still passes the space.
+- `ActionContext.add_circle(...)` builds the ring with `space=None` and appends `AddRingCmd(ring)`; nothing touches pymunk during dispatch.
+- `commands._add_ring` (applied FIFO with the other commands) refuses the ring if any live ball overlaps its band or `scene._tunnels(ball.radius, ring)`; otherwise `Scene._add_ring` adds body + shapes, registers the object, appends to `_rings` and logs a `spawn` event `(ring,)` into `_events` and `_cascade` (dispatched next step, like spawned balls).
+- Rejected alternative: an `A.add_circle` action. No scene needs it yet; a callback rule covers the use case (computing the position from the event).
