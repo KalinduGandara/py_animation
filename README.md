@@ -56,6 +56,7 @@ small reference scenes (tested), `scenes/` are finished Shorts-style videos.
 | Trails, glow, impact particles | `trail=True`, `glow=`, `A.particles` | `examples/midi_melody.py` |
 | Colour modes | `C.hue_cycle`, `C.by_speed` (`C.by_generation`, `C.fixed`: README only) | `examples/midi_melody.py`, `examples/static_shapes.py` |
 | Fill colour / texture patterns (scene-level) | polygons coloured per band | `scenes/fill_the_circle.py` (`--set texture=rings`) |
+| Territory battle between balls (fill / erode, first to N% wins) | `ctx.add_polygon` pieces per colour + own state | `scenes/color_wars.py` |
 | Hook title, live counters | `add_text(str, end=)`, `add_text(lambda s: ...)` | `examples/param_sweep.py`, all `scenes/` |
 | Tweakable knobs, seed sweeps | `scene.param`, `--set`, `bouncekit batch` | `examples/param_sweep.py` |
 | Live preview with hot reload (silent) | `bouncekit preview` | any |

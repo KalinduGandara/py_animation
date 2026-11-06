@@ -140,6 +140,9 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
     ball-sized pocket is left (`snug` x ball area), Für Elise per hit (~29 s). Look via
     `--set color= color2= texture=solid|rings|gradient|rainbow|checker band=`. Latest user
     feedback addressed; awaiting their next review.
+  - `color_wars.py`: blue vs pink ball; hitting free space or your colour grows it, hitting the
+    other colour wears it away at `erode` x the rate; first to `target` (30%) wins, else the
+    leader at 55 s. Seed 1: pink leads, blue comes back and wins 30-22 at ~42 s. Awaiting review.
   - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
 - **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
