@@ -26,33 +26,43 @@ def build_metadata(
     """Build the metadata dict for a finished render of ``scene`` to ``video``.
 
     Keys, in order: ``scene`` (``script`` as given), ``video`` (file name), ``seed``,
-    ``params``, ``duration``, ``frames``, ``fps``, ``size``, ``events`` (count per
-    kind of :data:`EVENT_KINDS`), ``sound_triggers``, ``versions`` and
-    ``render_seconds`` (rounded to 3 decimals). Every value except
-    ``render_seconds`` depends only on the script, seed, duration and overrides.
+    ``params``, ``duration`` (the rendered length, ``frames / fps``, FR-602),
+    ``frames``, ``fps``, ``size``, ``events`` (count per kind of :data:`EVENT_KINDS`),
+    ``sound_triggers``, ``stats`` (only when the scene recorded any with
+    ``scene.stat``, FR-601), ``versions`` and ``render_seconds`` (rounded to 3
+    decimals). Every value except ``render_seconds`` depends only on the script,
+    seed, duration and overrides.
     """
     from bouncekit import __version__  # local import: the package imports scene
 
     cfg = scene.config
     counts: Counter[str] = Counter(event.kind for event in scene.events)
-    return {
+    data: dict[str, object] = {
         "scene": script,
         "video": Path(video).name,
         "seed": cfg.seed,
         "params": scene.params,
-        "duration": cfg.duration,
+        "duration": round(scene.frame / cfg.fps, 6),
         "frames": scene.frame,
         "fps": cfg.fps,
         "size": [cfg.width, cfg.height],
         "events": {kind: counts.get(kind, 0) for kind in EVENT_KINDS},
         "sound_triggers": len(scene.triggers),
-        "versions": {
-            "bouncekit": __version__,
-            "pymunk": pymunk.version,
-            "pygame": pygame.version.ver,
-        },
-        "render_seconds": round(float(render_seconds), 3),
     }
+    stats = scene.stats
+    if stats:
+        data["stats"] = stats
+    data.update(
+        {
+            "versions": {
+                "bouncekit": __version__,
+                "pymunk": pymunk.version,
+                "pygame": pygame.version.ver,
+            },
+            "render_seconds": round(float(render_seconds), 3),
+        }
+    )
+    return data
 
 
 def write_metadata(video: Path, data: Mapping[str, object]) -> Path:

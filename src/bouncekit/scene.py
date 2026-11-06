@@ -172,6 +172,30 @@ class Scene:
         self._param_src: dict[str, str] = dict(_param_overrides)  # CLI text per name
         self._params: dict[str, tuple[ParamValue, ParamValue]] = {}  # name -> (default, value)
         self._texts: list[Text] = []  # overlays in add_text order (FR-406)
+        self._stats: dict[str, int | float | bool] = {}  # metadata only (FR-601)
+
+    def stat(self, name: str, value: float | bool) -> None:
+        """Record a named number for the render metadata (``"stats"``, FR-601).
+
+        A later call with the same name replaces the value; names keep first-call
+        order. Stats are never read by the simulation, so they can be updated from
+        rules at any time (for example a team's share after every hit).
+
+        Raises:
+            ConfigError: if ``name`` is not a non-empty str or ``value`` is not a
+                finite int, float or bool.
+        """
+        if not isinstance(name, str) or not name:
+            raise ConfigError(f"stat name must be a non-empty str; got {name!r}")
+        ok = isinstance(value, bool | int) or (isinstance(value, float) and math.isfinite(value))
+        if not ok:
+            raise ConfigError(f"stat value must be a finite int, float or bool; got {value!r}")
+        self._stats[name] = value
+
+    @property
+    def stats(self) -> dict[str, int | float | bool]:
+        """A copy of the stats recorded with :meth:`stat`, in first-call order."""
+        return dict(self._stats)
 
     def param(self, name: str, default: ParamValue) -> ParamValue:
         """Declare a param and return its value: the CLI override or ``default``.

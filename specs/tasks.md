@@ -253,7 +253,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
 
 ## M6 part 1 — Upload helpers (F2, F1, F7, F8)
 
-- [ ] T-601: Scene stats and metadata fixes.
+- [x] T-601: Scene stats and metadata fixes.
   - Requirements: FR-601, FR-602, NFR-601
   - Files: src/bouncekit/scene.py, export/metadata.py; tests/test_stats.py (new)
   - Done when these tests pass:
