@@ -45,17 +45,28 @@ CENTER = (540.0, 960.0)
 
 scene = Scene(duration=30.0, seed=42, background="#07070d", gravity=(0.0, 0.0), max_balls=400)
 
-ring = scene.add_circle(center=CENTER, radius=450, thickness=8, color="#e8e8ff", glow=1.0,
-                        tags={"wall"})
-scene.add_ball(pos=(540, 760), radius=22,
-               velocity=(scene.rng.uniform(-600, 600), scene.rng.uniform(400, 700)),
-               color=C.hue_cycle(step=29), trail=True, glow=1.0, constant_speed=True,
-               tags={"ball"})
+ring = scene.add_circle(
+    center=CENTER, radius=450, thickness=8, color="#e8e8ff", glow=1.0, tags={"wall"}
+)
+scene.add_ball(
+    pos=(540, 760),
+    radius=22,
+    velocity=(scene.rng.uniform(-600, 600), scene.rng.uniform(400, 700)),
+    color=C.hue_cycle(step=29),
+    trail=True,
+    glow=1.0,
+    constant_speed=True,
+    tags={"ball"},
+)
 
-scene.on_collision("ball", "wall", [
-    A.play(S.scale("C4", mode="major_pentatonic", octaves=2, voice="pluck"), pan=0.6),
-    A.particles(count=10),
-])
+scene.on_collision(
+    "ball",
+    "wall",
+    [
+        A.play(S.scale("C4", mode="major_pentatonic", octaves=2, voice="pluck"), pan=0.6),
+        A.particles(count=10),
+    ],
+)
 
 if __name__ == "__main__":
     scene.run()
@@ -83,14 +94,18 @@ Rules of thumb that save iterations:
   ```python
   escaped = {"n": 0}
 
+
   @scene.on_escape(ring, "ball")
   def count_escape(ctx, ball, _ring, event):
       escaped["n"] += 1
+
 
   scene.add_text(lambda s: f"ESCAPED: {escaped['n']}", pos=(540, 1600), size=64)
   ```
 
   It is deterministic because rules run in simulation order. Avoid scanning `scene.events` every frame; it grows with every contact.
+- **Teams and names on balls:** `add_ball(..., label="RED")` or an emoji (`label="🔥"`); `label_scale` sizes it relative to the radius (default 1.0 fits 2–3 letters), and `label_color=None` picks dark or white for contrast. Split children keep labels; pass `label=` to `A.spawn` too. Emoji also work in `add_text` hooks ("Pick your color 👇"), but only single symbols: flags (🇧🇷) and joined emoji do not combine, so spell country codes instead.
+- **Upload helpers (use them in every video):** `Scene(loop_fade=0.4)` makes the ending blend into frame 0 (good for replays); call `ctx.mark_climax()` (or `A.mark_climax()`) at the moment of the result so `render --export` saves that frame as `<stem>_thumb.png`; `scene.post(title=lambda s: ..., description=..., hashtags=[...])` writes `<stem>_post.txt` (title ≤ 100 chars; make it state the real outcome); `scene.stat("name", number)` records numbers for the metadata so `bouncekit batch --seeds 1-8 --score "-abs(stats.a - stats.b)" --keep-best 2 --export` keeps the closest finishes.
 - **Tweakable knobs:** expose the numbers the user is likely to tune with `scene.param("gap", 40.0)`, so they can re-render with `--set gap=60` or sweep with `bouncekit batch`.
 
 Keep lines ≤ 100 characters; the repo's `uv run ruff check .` covers `scenes/` too.
@@ -106,7 +121,7 @@ This catches `ConfigError`s and script errors quickly. Error messages name the f
 ### 4. Full render and check it against the plan
 
 ```bash
-uv run bouncekit render scenes/<slug>.py --quiet
+uv run bouncekit render scenes/<slug>.py --quiet --export
 uv run python .claude/skills/bouncekit-video/scripts/inspect_video.py out/<slug>_seed42.mp4 --frames 6 --at 1.0
 ```
 

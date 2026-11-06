@@ -58,6 +58,11 @@ small reference scenes (tested), `scenes/` are finished Shorts-style videos.
 | Fill colour / texture patterns (scene-level) | polygons coloured per band | `scenes/fill_the_circle.py` (`--set texture=rings`) |
 | Territory battle between balls (fill / erode, first to N% wins) | `ctx.add_polygon` pieces per colour + own state | `scenes/color_wars.py` |
 | Hook title, live counters | `add_text(str, end=)`, `add_text(lambda s: ...)` | `examples/param_sweep.py`, all `scenes/` |
+| Names / emoji on balls (teams, countries), kept on split | `add_ball(..., label="🔥")`, `A.spawn(label=)` | `examples/team_race.py` |
+| Emoji in any text (single symbols; no flags) | bundled Noto Emoji fallback | `examples/team_race.py` |
+| Pick the best seed automatically (closest race, fastest end) | `scene.stat`, `batch --score EXPR --keep-best N` | `examples/team_race.py` |
+| Ending that loops back into the start | `Scene(loop_fade=0.4)` | `examples/team_race.py` |
+| Thumbnail of the climax + title/description/hashtags file | `A.mark_climax()`, `scene.post(...)`, `--export` | `examples/team_race.py` |
 | Tweakable knobs, seed sweeps | `scene.param`, `--set`, `bouncekit batch` | `examples/param_sweep.py` |
 | Live preview with hot reload (silent) | `bouncekit preview` | any |
 
@@ -227,7 +232,7 @@ See `examples/midi_melody.py` (`uv run bouncekit render examples/midi_melody.py`
 ## Parameters, batches and text (M4)
 
 ```python
-gap = scene.param("gap", 40.0)      # `--set gap=60` -> 60.0 (typed like the default)
+gap = scene.param("gap", 40.0)  # `--set gap=60` -> 60.0 (typed like the default)
 ring = scene.add_circle(center=(540, 960), radius=450, gap_degrees=gap, tags={"wall"})
 scene.add_text("Can it escape?", pos=(540, 260), size=72, end=3.0)
 scene.add_text(lambda s: f"balls: {s.count('ball')}", pos=(540, 1700), size=48)
@@ -246,14 +251,65 @@ uv run bouncekit batch examples/param_sweep.py --seeds 1-3 --grid gap=30,60 --jo
   overrides, `--duration`, `--jobs N` worker processes, `--out-dir DIR`, `--quiet`.
   A failing job is reported and does not stop the others; the exit code is non-zero if any failed.
 - Names: `<out-dir>/<stem>_seed<seed>_<name>-<value>.mp4` (one `_name-value` per override).
-- Each MP4 gets a metadata `.json` beside it: `scene`, `video`, `seed`, `params`, `duration`,
-  `frames`, `fps`, `size`, `events` (counts per kind), `sound_triggers`, `versions`,
-  `render_seconds`. Everything but `render_seconds` is deterministic.
+- Each MP4 gets a metadata `.json` beside it: `scene`, `video`, `seed`, `params`, `duration`
+  (the rendered length, so an early `end_after` shows), `frames`, `fps`, `size`, `events`
+  (counts per kind), `sound_triggers`, `stats` (only if the scene called `scene.stat`, M6),
+  `versions`, `render_seconds`. Everything but `render_seconds` is deterministic.
 - `scene.add_text(text, pos=, size=64, color=, start=0, end=None)` draws centred text
   (a string or `f(scene) -> str`), visible from `start` to `end` seconds.
 - `render` and `batch` show a progress bar with an ETA on a terminal; `--quiet` hides it.
 
 See `examples/param_sweep.py`.
+
+## Upload helpers (M6)
+
+```python
+scene = Scene(duration=25.0, loop_fade=0.4)  # last 0.4 s cross-fades into frame 0
+ball = scene.add_ball(pos=(540, 960), radius=34, color="#ff5a36", label="🔥")
+scene.stat("escape_time", 3.7)  # a number for the metadata / --score
+
+
+@scene.on_escape(ring, "ball")
+def first_out(ctx, ball, ring, event):
+    ctx.mark_climax()  # the thumbnail frame
+    ctx.end_after(2.0)
+
+
+scene.post(
+    title=lambda s: "🔥 escaped first!",
+    description="Pick yours.",
+    hashtags=["physics", "satisfying"],
+)
+```
+
+```bash
+uv run bouncekit render examples/team_race.py --export
+uv run bouncekit batch examples/team_race.py --seeds 1-8 --score "-stats.escape_time" --keep-best 2 --export
+```
+
+- **Labels**: `add_ball`, `A.spawn` and `ctx.spawn` take `label=` (text or emoji),
+  `label_color=` (default: dark on light balls, white on dark ones) and `label_scale=` (font
+  size = `label_scale × radius`, default 1). Labels follow the ball, are drawn over the glow,
+  and split children keep them. `ball.label = "x"` changes one at any time (visual only).
+- **Emoji**: any text (labels, `add_text`) falls back to the bundled monochrome Noto Emoji
+  font (SIL OFL 1.1, `src/bouncekit/fonts/`) for characters the default font lacks. Single
+  symbols only: flags and joined sequences do not combine.
+- **Stats and scoring**: `scene.stat(name, number)` records a value (last call wins) that is
+  written to the metadata as `"stats"`. `batch --score EXPR` ranks every render and writes
+  `<out-dir>/ranking.json` (highest score first). `EXPR` is arithmetic (`+ - * / // % **`,
+  `abs min max round`) over `duration`, `frames`, `seed`, `sound_triggers`, `stats.<name>`,
+  `events.<kind>` and `params.<name>`; for example `-abs(stats.blue - stats.pink)` for the
+  closest race. Renders whose score cannot be computed rank last with an `error`.
+  `--keep-best N` deletes all but the N best (MP4, JSON and export files).
+- **Loop ending**: `Scene(loop_fade=s)` blends the last `s` seconds of the MP4 into the first
+  frame and fades the audio out over them, also when `end_after` ends the video early.
+- **Export pack**: `render --export` / `batch --export` write `<stem>_thumb.png` (the climax
+  frame: the last `A.mark_climax()` / `ctx.mark_climax()`, else the frame after the first
+  `end_after`, else the last frame) and `<stem>_post.txt` (`TITLE`, `DESCRIPTION`, `HASHTAGS`
+  from `scene.post`; title ≤ 100 characters, callables are evaluated after the render so the
+  text can state the real result).
+
+See `examples/team_race.py`.
 
 ## CLI
 

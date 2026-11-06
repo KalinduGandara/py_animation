@@ -306,7 +306,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `post` validation and `post_text` format (callables evaluated, `#` added).
     - `render --export` writes a 1080×1920-style PNG (size from config) whose pixels equal `climax_image`, and the post file; without `post` it writes only the PNG and prints the note; a failed job leaves no pack files; `batch --export --keep-best` deletes losers' pack files.
 
-- [ ] T-607: Example, README, skill guide.
+- [x] T-607: Example, README, skill guide.
   - Requirements: FR-612
   - Files: examples/team_race.py (new), tests/test_example.py, README.md, .claude/skills/bouncekit-video/SKILL.md, CLAUDE.md
   - Done when these tests pass:

@@ -405,3 +405,38 @@ def test_readme_covers_capabilities_and_m5_early() -> None:
     for word in ("What you can make", "add_polygon", "ctx.add_polygon", "ctx.add_circle",
                  "static_shapes.py"):  # fmt: skip
         assert word in text
+
+
+TEAM_RACE = EXAMPLE.parent / "team_race.py"
+
+
+def test_team_race_uses_m6_features() -> None:
+    """FR-612: labels with an emoji, stats, loop_fade, a climax mark and post text."""
+    scene = load_scene(TEAM_RACE, seed=4)
+    labels = [o.label for o in scene.objects if isinstance(o, Ball)]
+    assert "\U0001f525" in labels and len(labels) == 3
+    assert scene.config.loop_fade > 0
+    while scene.frame < scene.total_frames:
+        scene.step_frame()
+    assert scene.climax_frame is not None
+    assert scene.stats["escape_time"] < scene.config.duration
+    text = scene.post_text()
+    assert text is not None and "WINS" not in text and "escaped first" in text
+
+
+def test_team_race_export_render(tmp_path: Path) -> None:
+    out = tmp_path / "race.mp4"
+    argv = ["render", str(TEAM_RACE), "--seed", "4", "--duration", "1.2", "--out", str(out),
+            "--quiet", "--export"]  # fmt: skip
+    assert main(argv) == 0
+    data = json.loads(out.with_suffix(".json").read_text())
+    assert data["stats"]["winner_index"] == 2
+    assert (tmp_path / "race_thumb.png").exists()
+    assert (tmp_path / "race_post.txt").read_text().startswith("TITLE\nGO escaped first!")
+
+
+def test_readme_covers_m6() -> None:
+    text = (EXAMPLE.parent.parent / "README.md").read_text()
+    for word in ("label=", "scene.stat", "--score", "--keep-best", "loop_fade", "mark_climax",
+                 "scene.post", "--export", "team_race.py"):  # fmt: skip
+        assert word in text

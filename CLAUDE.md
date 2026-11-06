@@ -20,6 +20,7 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Regenerate assets (M3): `uv run python scripts/make_assets.py` (writes `assets/midi/`, `assets/samples/`; output must stay byte-identical)
 - Params (M4): scripts declare `x = scene.param("x", default)`; override with `--set x=V` on render/preview/batch
 - Batch (M4): `uv run bouncekit batch examples/param_sweep.py --seeds 1-10 [--grid gap=30,60] [--set k=v] [--jobs N] [--out-dir out/] [--quiet]` (exit 1 if any job failed); each CLI render writes `<stem>.json` metadata beside the MP4
+- Upload helpers (M6): `uv run bouncekit render examples/team_race.py --export` (thumbnail + post text); `uv run bouncekit batch <scene> --seeds 1-8 --score "<expr over stats./events./params.>" --keep-best 2 [--export]` writes `ranking.json`; labels `add_ball(label=)`, `Scene(loop_fade=)`, `scene.stat`, `A.mark_climax`, `scene.post`
 
 ## Conventions
 - Determinism is non-negotiable: fixed timestep, `scene.rng` only, no wall-clock in simulation, insertion-ordered containers.
@@ -33,4 +34,5 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - pymunk 7 API: `space.on_collision(...)`, `space.add_post_step_callback(...)` — don't copy pre-7 examples.
 - Per task: tests first; tick `specs/tasks.md`; append to `specs/progress.md`; commit `feat(area): T-<id> desc [FR-…]`.
 - M5 pulled forward at the user's request (2026-11-06): only T-501 `ctx.add_circle` and T-502 static convex polygons (`add_polygon`, `ctx.add_polygon`, `Renderer.polygon`). The rest of M5 stays unbuilt until asked. Runtime rings/polygons are queued like other commands and refused silently on ball overlap.
+- M6 part 1 (F2, F1, F7, F8) approved 2026-11-06; F3–F6, F9, F10 stay unbuilt until asked. The bundled `src/bouncekit/fonts/NotoEmoji.ttf` (OFL) is the only new asset; scenes without M6 features must keep their M5 frame/audio bytes.
 - No new runtime dependencies without asking the user (SRS stack — numpy, soundfile, mido, pymunk, pygame-ce — is approved).
