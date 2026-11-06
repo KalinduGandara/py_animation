@@ -176,6 +176,10 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
     from static polygons; ball (800 px/s, ±20° turn per hit, long trail) explores; Für Elise
     per wall hit; seed 12 escapes at 32.3 s ("ESCAPED in 0:32.3!", 34.8 s video). Perfect
     mazes (no braid) trapped the ball in 8/10 seeds; noted in the skill lessons. Awaiting review.
+  - `plinko.py` (M6 video 3): 100 balls (5 already falling at frame 0) from random x through
+    11 rows of 12-gon pegs + wall bumpers into 5 slots; counts under the slots; "SLOT N WINS!"
+    only after all 100 land ("TIE!" if level). Seed 1: slot 2 leads from the start, slot 5
+    overtakes at ~16 s and wins 24-23 (22.6 s video). Awaiting review.
   - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
 - **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
