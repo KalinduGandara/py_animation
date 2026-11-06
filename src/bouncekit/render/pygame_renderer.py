@@ -73,6 +73,36 @@ class PygameRenderer:
         """
         self._fill_distance(_line_bbox(a, b, width), _line_distance(a, b, width), color)
 
+    def polygon(self, points: Sequence[Vec], color: Color) -> None:
+        """Fill a convex polygon; see :class:`Renderer`.
+
+        Coverage comes from the largest signed distance to the edge lines, less half a
+        pixel, so adjacent polygons overlap by half a pixel and show no seam.
+        """
+        pts = list(points)
+        if len(pts) < 3:
+            return
+        area2 = sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(pts, pts[1:] + pts[:1], strict=True))
+        if area2 == 0:
+            return
+        sign = 1.0 if area2 > 0 else -1.0  # outward normal is sign * (ey, -ex)
+        edges = []
+        for (ax, ay), (bx, by) in zip(pts, pts[1:] + pts[:1], strict=True):
+            ex, ey = bx - ax, by - ay
+            length = math.hypot(ex, ey)
+            if length > 0:
+                edges.append((ax, ay, sign * ey / length, -sign * ex / length))
+
+        def distance(px: Floats, py: Floats) -> Floats:
+            out: Floats = np.full(np.broadcast(px, py).shape, -np.inf)
+            for ax, ay, nx, ny in edges:
+                np.maximum(out, (px - ax) * nx + (py - ay) * ny, out=out)
+            return out - 0.5
+
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        self._fill_distance((min(xs), min(ys), max(xs), max(ys)), distance, color)
+
     def arc(
         self,
         center: Vec,

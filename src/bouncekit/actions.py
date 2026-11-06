@@ -31,6 +31,7 @@ from bouncekit.errors import ConfigError
 from bouncekit.sound import Melody, Note, Scale, Source
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
 if TYPE_CHECKING:
     from bouncekit.rules.context import ActionContext
@@ -61,14 +62,14 @@ __all__ = [
     "split",
 ]
 
-type Target = Literal["a", "b"] | Ball | CircleBoundary
+type Target = Literal["a", "b"] | Ball | CircleBoundary | Polygon
 """Which object an action acts on: the rule's subject ``"a"``/``"b"`` or an object handle."""
 
 
 def _target(value: object) -> Target:
-    if value in ("a", "b") or isinstance(value, Ball | CircleBoundary):
+    if value in ("a", "b") or isinstance(value, Ball | CircleBoundary | Polygon):
         return value
-    raise ConfigError(f"target must be 'a', 'b' or a ball/ring handle; got {value!r}")
+    raise ConfigError(f"target must be 'a', 'b' or a ball/ring/polygon handle; got {value!r}")
 
 
 @dataclass(frozen=True, eq=False)

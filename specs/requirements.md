@@ -468,3 +468,11 @@ Pulled ahead of M5 at the user's request (2026-11-06) so a scene can grow its wa
 - The returned handle's `alive` SHALL be `False` until the queued command is applied (FIFO, after dispatch). Then the ring SHALL join the space, `objects`, collisions and rules like any ring, and a `spawn` event with `objects == (ring,)`, `speed == 0.0`, `position == center` SHALL be logged.
 - WHEN a live ball overlaps the ring's band (`|d − radius| < thickness/2 + ball.radius`, gap ignored) or could tunnel through it (FR-202 tunnelling rule), THE SYSTEM SHALL refuse the ring silently: not added, no event, handle stays not `alive` (NFR-202). Destroying a refused handle is a no-op.
 - A ring with `thickness ≥ 2 × radius` is a solid disc of radius `radius + thickness/2` (physics and drawing).
+
+### FR-502 Static convex polygons — [M5], [API], [Phys]
+- `scene.add_polygon(*, points, color="#ffffff", elasticity=1.0, tags=()) -> Polygon` SHALL add a static, solid polygon: the convex hull of `points` (screen pixels). Fewer than three non-collinear finite points SHALL raise `ConfigError` naming `points`. Balls bounce off its edges; it takes part in collision rules via `tags`, is drawn filled, and can be destroyed, recoloured and flashed like a ring. It never glows.
+- `Polygon` SHALL expose `points` (hull, clockwise on screen), `center` (vertex mean), `color` (settable), `tags`, `alive`, `distance(point)` (signed, negative inside) and `overlaps(pos, radius)`.
+- `ctx.add_polygon(**same)` SHALL validate at the call and queue it like `ctx.add_circle` (FR-501): `alive` is `False` until added; added FIFO after dispatch with a `spawn` event `(polygon,)` at `center`; refused silently if a live ball overlaps it. Polygons are solid, so no tunnelling check applies.
+
+### FR-503 Renderer polygon primitive — [Stack], [Arch]
+- `Renderer.polygon(points, color)` SHALL fill a convex polygon (either winding) with a one-pixel anti-aliased edge whose coverage reaches half a pixel past the edges, so polygons sharing an edge show no seam. Same calls SHALL give the same bytes.

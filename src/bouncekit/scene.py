@@ -54,6 +54,7 @@ from bouncekit.sound import Melody, Note, Scale
 from bouncekit.text import Text, make_text
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
 __all__ = ["Scene", "WorldObject"]
 
@@ -644,7 +645,8 @@ class Scene:
             shapes = list(obj.shapes)
             speed = 0.0
             position = obj.center
-            self._rings.remove(obj)
+            if isinstance(obj, CircleBoundary):
+                self._rings.remove(obj)
         # Removing runs the recorder's ``separate`` for current contacts right here.
         self.space.remove(obj.body, *shapes)
         for shape in shapes:
@@ -701,14 +703,15 @@ class Scene:
         self._cascade.append(ev)
         return ball
 
-    def _add_ring(self, ring: CircleBoundary) -> None:
-        """Add a built ring now (command application) and log its spawn event (FR-501)."""
-        self.space.add(ring.body, *ring.shapes)
-        ring.alive = True
-        self._register_object(ring, ring.shapes)
-        self._rings.append(ring)
+    def _add_static(self, obj: CircleBoundary | Polygon) -> None:
+        """Add a built ring or polygon now (command application) and log its spawn event."""
+        self.space.add(obj.body, *obj.shapes)
+        obj.alive = True
+        self._register_object(obj, obj.shapes)
+        if isinstance(obj, CircleBoundary):
+            self._rings.append(obj)
         ev = Event(
-            "spawn", self._step, self._sim_frame, self._step / self._rate, (ring,), 0.0, ring.center
+            "spawn", self._step, self._sim_frame, self._step / self._rate, (obj,), 0.0, obj.center
         )
         self._events.append(ev)
         self._cascade.append(ev)
@@ -776,6 +779,27 @@ class Scene:
         self._register_object(ring, ring.shapes)
         self._rings.append(ring)
         return ring
+
+    def add_polygon(
+        self,
+        *,
+        points: Iterable[Vec],
+        color: ColorLike | Fixed = "#ffffff",
+        elasticity: float = 1.0,
+        tags: Iterable[str] = (),
+    ) -> Polygon:
+        """Add a static, solid convex polygon (the convex hull of ``points``); see :class:`Polygon`.
+
+        Balls bounce off its edges; it is drawn filled in ``color`` and takes part in
+        collision rules through its ``tags`` (FR-502).
+
+        Raises:
+            ConfigError: if ``points`` has fewer than three non-collinear finite points
+                or another option is invalid.
+        """
+        poly = Polygon(self.space, points=points, color=color, elasticity=elasticity, tags=tags)
+        self._register_object(poly, poly.shapes)
+        return poly
 
     def add_ball(
         self,

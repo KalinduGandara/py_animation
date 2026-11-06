@@ -14,8 +14,9 @@ import pymunk
 from bouncekit.config import Vec
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
-WorldObject = CircleBoundary | Ball
+WorldObject = CircleBoundary | Ball | Polygon
 
 
 EventKind = Literal["collision", "escape", "spawn", "destroy", "timer", "condition"]

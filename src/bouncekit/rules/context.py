@@ -34,7 +34,7 @@ from bouncekit.config import Vec, _vec
 from bouncekit.errors import ConfigError
 from bouncekit.events import Event, WorldObject
 from bouncekit.rules.commands import (
-    AddRingCmd,
+    AddStaticCmd,
     BallSpec,
     DestroyCmd,
     EndCmd,
@@ -48,6 +48,7 @@ from bouncekit.rules.commands import (
 from bouncekit.sound import Source
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
 if TYPE_CHECKING:
     from bouncekit.scene import Scene
@@ -99,10 +100,10 @@ class ActionContext:
         """Queue removal of ``obj`` (a ball or ring) after dispatch.
 
         Raises:
-            ConfigError: if ``obj`` is not a ball or ring handle.
+            ConfigError: if ``obj`` is not a ball, ring or polygon handle.
         """
-        if not isinstance(obj, Ball | CircleBoundary):
-            raise ConfigError(f"obj must be a ball or ring handle; got {obj!r}")
+        if not isinstance(obj, Ball | CircleBoundary | Polygon):
+            raise ConfigError(f"obj must be a ball, ring or polygon handle; got {obj!r}")
         self.scene._queue.append(DestroyCmd(obj))
 
     def split(
@@ -245,8 +246,29 @@ class ActionContext:
             tags=tags,
             glow=glow,
         )
-        self.scene._queue.append(AddRingCmd(ring))
+        self.scene._queue.append(AddStaticCmd(ring))
         return ring
+
+    def add_polygon(
+        self,
+        *,
+        points: Iterable[Vec],
+        color: ColorLike | Fixed = "#ffffff",
+        elasticity: float = 1.0,
+        tags: Iterable[str] = (),
+    ) -> Polygon:
+        """Queue adding a static convex polygon; options as ``scene.add_polygon`` (FR-502).
+
+        Built and validated now, added after dispatch (``alive`` is ``False`` until
+        then) with a spawn event ``(polygon,)``; refused (never added, no error) when a
+        live ball overlaps it.
+
+        Raises:
+            ConfigError: if any option is invalid.
+        """
+        poly = Polygon(None, points=points, color=color, elasticity=elasticity, tags=tags)
+        self.scene._queue.append(AddStaticCmd(poly))
+        return poly
 
     def recolor(self, obj: WorldObject, color: ColorSpec) -> None:
         """Queue setting the base colour of ``obj`` (a ball or ring) (FR-210, FR-306).
@@ -255,10 +277,10 @@ class ActionContext:
         command is applied); a ring takes a colour value or ``C.fixed(...)`` only.
 
         Raises:
-            ConfigError: if ``obj`` is not a ball or ring handle or ``color`` is invalid.
+            ConfigError: if ``obj`` is not a ball, ring or polygon handle or ``color`` is invalid.
         """
         _check_object("obj", obj)
-        if isinstance(obj, CircleBoundary):
+        if isinstance(obj, CircleBoundary | Polygon):
             self.scene._queue.append(RecolorCmd(obj, ring_color(color)))
         else:
             self.scene._queue.append(RecolorCmd(obj, color_source(color)))
@@ -305,7 +327,7 @@ class ActionContext:
         """Queue a flash of ``obj`` (a ball or ring); visual only, as ``A.flash`` (FR-210).
 
         Raises:
-            ConfigError: if ``obj`` is not a ball or ring handle, ``seconds`` is
+            ConfigError: if ``obj`` is not a ball, ring or polygon handle, ``seconds`` is
                 negative or not finite, or ``color`` is invalid.
         """
         action = flash(obj, seconds=seconds, color=color)
@@ -405,5 +427,5 @@ class ActionContext:
 
 
 def _check_object(name: str, obj: object) -> None:
-    if not isinstance(obj, Ball | CircleBoundary):
-        raise ConfigError(f"{name} must be a ball or ring handle; got {obj!r}")
+    if not isinstance(obj, Ball | CircleBoundary | Polygon):
+        raise ConfigError(f"{name} must be a ball, ring or polygon handle; got {obj!r}")

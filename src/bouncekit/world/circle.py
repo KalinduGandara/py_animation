@@ -143,6 +143,16 @@ class CircleBoundary:
         """Tags given at creation."""
         return self._tags
 
+    def overlaps(self, pos: Vec, radius: float) -> bool:
+        """Whether a circle at ``pos`` of ``radius`` overlaps the ring's band.
+
+        The band is ``radius ± thickness / 2`` treated as a full circle (any gap is
+        ignored), so the answer is conservative.
+        """
+        cx, cy = self.center
+        d = math.hypot(pos[0] - cx, pos[1] - cy)
+        return abs(d - self._radius) < self._thickness / 2 + radius
+
     def draw(self, renderer: Renderer, color: Color | None = None) -> None:
         """Draw the ring as a smooth arc at the current rotation in ``color`` (default: its colour).
 

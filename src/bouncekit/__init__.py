@@ -12,6 +12,7 @@ from bouncekit.scene import Scene
 from bouncekit.text import Text
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
 __version__ = "0.1.0"
 
@@ -19,6 +20,7 @@ __all__ = [
     "AudioConfig",
     "Ball",
     "CircleBoundary",
+    "Polygon",
     "ConfigError",
     "EffectsConfig",
     "Scene",

@@ -5,7 +5,8 @@ queue. ``apply`` runs them in the window after dispatch and before the next
 ``space.step``. A command whose target is no longer alive is skipped silently.
 Split, spawn and resize commands that would exceed the ball cap or let a ball
 tunnel through a ring are refused as a whole, without an error (C8). An added ring
-is refused the same way if a live ball overlaps it or could tunnel through it (FR-501).
+or polygon is refused the same way if a live ball overlaps it or could tunnel
+through it (FR-501, FR-502).
 """
 
 import math
@@ -16,12 +17,13 @@ from bouncekit.colors import Color, ColorSource
 from bouncekit.config import Vec
 from bouncekit.world.ball import Ball
 from bouncekit.world.circle import CircleBoundary
+from bouncekit.world.polygon import Polygon
 
 if TYPE_CHECKING:
     from bouncekit.scene import Scene
 
 __all__ = [
-    "AddRingCmd",
+    "AddStaticCmd",
     "BallSpec",
     "Command",
     "DestroyCmd",
@@ -40,7 +42,7 @@ __all__ = [
 class DestroyCmd:
     """Remove ``obj`` from the space, the scene's objects and the drawing."""
 
-    obj: Ball | CircleBoundary
+    obj: Ball | CircleBoundary | Polygon
 
 
 @dataclass(frozen=True, eq=False)
@@ -91,7 +93,7 @@ class EndCmd:
 class RecolorCmd:
     """Set ``obj``'s base colour (a colour mode for balls, resolved when applied)."""
 
-    obj: Ball | CircleBoundary
+    obj: Ball | CircleBoundary | Polygon
     color: ColorSource
 
 
@@ -117,16 +119,16 @@ class VelocityCmd:
 class FlashCmd:
     """Draw ``obj`` blended from ``color`` back to its base colour over ``frames`` frames."""
 
-    obj: Ball | CircleBoundary
+    obj: Ball | CircleBoundary | Polygon
     color: Color
     frames: int
 
 
 @dataclass(frozen=True, eq=False)
-class AddRingCmd:
-    """Add ``ring`` (built, not yet in the space) to the scene (FR-501)."""
+class AddStaticCmd:
+    """Add ``obj`` (a ring or polygon built but not yet in the space) to the scene."""
 
-    ring: CircleBoundary
+    obj: CircleBoundary | Polygon
 
 
 type Command = (
@@ -138,7 +140,7 @@ type Command = (
     | ResizeCmd
     | VelocityCmd
     | FlashCmd
-    | AddRingCmd
+    | AddStaticCmd
 )
 
 
@@ -161,8 +163,8 @@ def apply(scene: "Scene", cmd: Command) -> None:
         _resize(scene, cmd)
     elif isinstance(cmd, VelocityCmd):
         _set_velocity(scene, cmd)
-    elif isinstance(cmd, AddRingCmd):
-        _add_ring(scene, cmd)
+    elif isinstance(cmd, AddStaticCmd):
+        _add_static(scene, cmd)
     elif isinstance(cmd, FlashCmd):
         if cmd.obj.alive:
             # Starts at the next drawn frame: the frame count once the current frame completes.
@@ -309,19 +311,15 @@ def _set_velocity(scene: "Scene", cmd: VelocityCmd) -> None:
         ball.target_speed = math.hypot(*ball.velocity)
 
 
-def _add_ring(scene: "Scene", cmd: AddRingCmd) -> None:
-    """Add the ring unless a live ball overlaps its band or could tunnel through it.
+def _add_static(scene: "Scene", cmd: AddStaticCmd) -> None:
+    """Add the ring or polygon unless a live ball overlaps it or could tunnel through it.
 
-    The band is ``radius ± thickness / 2`` around the centre, treated as a full
-    circle (any gap is ignored), so the check is conservative.
+    Polygons are solid, so only rings are checked for tunnelling.
     """
-    ring = cmd.ring
-    cx, cy = ring.center
-    half = ring.thickness / 2
+    obj = cmd.obj
     for ball in scene._balls:
-        x, y = ball.position
-        if abs(math.hypot(x - cx, y - cy) - ring.radius) < half + ball.radius:
+        if obj.overlaps(ball.position, ball.radius):
             return
-        if scene._tunnels(ball.radius, ring):
+        if isinstance(obj, CircleBoundary) and scene._tunnels(ball.radius, obj):
             return
-    scene._add_ring(ring)
+    scene._add_static(obj)

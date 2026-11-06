@@ -67,6 +67,14 @@ class Renderer(Protocol):
         """Draw a line ``width`` pixels thick from ``a`` to ``b`` with round caps."""
         ...
 
+    def polygon(self, points: Sequence[Vec], color: Color) -> None:
+        """Fill the convex polygon ``points`` (either winding) with an anti-aliased edge.
+
+        The fill reaches half a pixel past the edges, so convex polygons that share an
+        edge leave no seam between them (FR-503).
+        """
+        ...
+
     def arc(
         self,
         center: Vec,

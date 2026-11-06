@@ -1168,3 +1168,9 @@ def load_scene(path, seed=None, duration=None, params: Mapping[str, str] | None 
 - `ActionContext.add_circle(...)` builds the ring with `space=None` and appends `AddRingCmd(ring)`; nothing touches pymunk during dispatch.
 - `commands._add_ring` (applied FIFO with the other commands) refuses the ring if any live ball overlaps its band or `scene._tunnels(ball.radius, ring)`; otherwise `Scene._add_ring` adds body + shapes, registers the object, appends to `_rings` and logs a `spawn` event `(ring,)` into `_events` and `_cascade` (dispatched next step, like spawned balls).
 - Rejected alternative: an `A.add_circle` action. No scene needs it yet; a callback rule covers the use case (computing the position from the event).
+
+### Static polygons (FR-502, FR-503)
+- `world/polygon.py`: `Polygon(space | None, points=...)` takes the monotone-chain hull, builds one `pymunk.Poly` on its own STATIC body, and offers `distance`/`overlaps` in pure Python (used before the shape is in a space). `CircleBoundary.overlaps` holds the FR-501 band rule.
+- `AddRingCmd` became `AddStaticCmd(obj)` for rings and polygons; `commands._add_static` refuses on `obj.overlaps(ball)` (and ring tunnelling); `Scene._add_static` adds, registers, appends rings to `_rings`, and logs the spawn event. `Scene._remove` only touches `_rings` for rings.
+- `PygameRenderer.polygon` reuses `_fill_distance`: distance is the max signed distance to the edge lines minus 0.5 px (exact inside and along edges; near corners it slightly over-covers, invisible at 1 px).
+- Not done (rest of M5): segments, dynamic polygons, joints, camera.

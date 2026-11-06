@@ -128,6 +128,9 @@ Built-in actions (`from bouncekit import actions as A`; `target="a"` by default,
 joins the scene after dispatch (its handle's `alive` is `False` until then) and logs a spawn
 event; it is refused silently if a live ball overlaps it or could tunnel through it. A ring with
 `thickness >= 2 * radius` is a solid disc, e.g. a lump stuck where a ball hit.
+`scene.add_polygon(points=[...], color=, elasticity=1, tags=())` adds a static, solid convex
+polygon (the convex hull of the points), drawn filled; `ctx.add_polygon(...)` queues one the
+same way as `ctx.add_circle`. Polygons can be destroyed, recoloured and flashed.
 
 - **Cooldowns:** a collision rule skips its non-play handlers for a pair that fired
   less than `cooldown` seconds ago (default `Scene(rule_cooldown=0.05)`); `object_cooldown`

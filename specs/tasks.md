@@ -240,3 +240,13 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - A ring overlapping a live ball, or one a live ball could tunnel through, is refused without an error; destroying it is a no-op.
     - Bad options raise `ConfigError` at the call.
     - A scene adding rings from a collision rule gives identical events on two runs.
+
+- [x] T-502: Static convex polygons and `Renderer.polygon`.
+  - Requirements: FR-502, FR-503
+  - Files: src/bouncekit/world/polygon.py (new), world/circle.py, events.py, actions.py, rules/commands.py, rules/context.py, scene.py, render/base.py, render/pygame_renderer.py, __init__.py, README.md; tests/test_polygon.py (new)
+  - Done when these tests pass:
+    - A ball falling onto an `add_polygon` floor bounces and fires a `ball`/`floor` rule; the hull drops interior points; bad `points` raise `ConfigError`.
+    - `overlaps` matches geometry (inside, edge, corner).
+    - `ctx.add_polygon` is queued, refused on ball overlap, recolourable, flashable and destroyable with spawn/destroy events.
+    - `Renderer.polygon` fills, two polygons sharing an edge leave no dark seam, same calls give the same bytes; `Scene.draw` uses the flash colour.
+    - A scene adding polygons from a rule is deterministic.
