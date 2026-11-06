@@ -22,7 +22,46 @@ from bouncekit.config import (
     _trail,
     _vec,
 )
+from bouncekit.errors import ConfigError
 from bouncekit.render.base import Renderer
+
+LIGHT_LABEL: Color = (17, 17, 17)
+"""Auto label colour on light balls (relative luminance > ``LABEL_LUMINANCE``)."""
+DARK_LABEL: Color = (255, 255, 255)
+"""Auto label colour on dark balls."""
+LABEL_LUMINANCE = 0.4
+
+
+def label_options(
+    label: object, label_color: object, label_scale: object
+) -> tuple[str | None, Color | None, float]:
+    """Validate the label options of ``add_ball``/``A.spawn``/``ctx.spawn`` (FR-605).
+
+    Raises:
+        ConfigError: naming ``label``, ``label_color`` or ``label_scale``.
+    """
+    if label is not None and not isinstance(label, str):
+        raise ConfigError(f"label must be a str or None; got {label!r}")
+    color: Color | None = None
+    if label_color is not None:
+        try:
+            color = parse_color(label_color)  # type: ignore[arg-type]
+        except ConfigError as err:
+            raise ConfigError(f"label_color is invalid: {err}") from err
+    scale = _positive_number("label_scale", label_scale)
+    return label, color, scale
+
+
+def label_color_for(ball_color: Color) -> Color:
+    """Auto contrast: dark text on light colours, white on dark (WCAG luminance)."""
+
+    def linear(channel: int) -> float:
+        c = channel / 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (linear(c) for c in ball_color)
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return LIGHT_LABEL if luminance > LABEL_LUMINANCE else DARK_LABEL
 
 
 class Ball:
@@ -46,6 +85,9 @@ class Ball:
         tags: Iterable[str] = (),
         trail: bool = False,
         glow: float | bool = 0.0,
+        label: str | None = None,
+        label_color: ColorLike | None = None,
+        label_scale: float = 1.0,
     ) -> None:
         """Validate the options, create the body and shape, and add them to ``space``.
 
@@ -60,6 +102,7 @@ class Ball:
         self._tags = _tags(tags)
         trail_value = _trail(trail)
         glow_value = _glow(glow)
+        label_value, label_rgb, scale_value = label_options(label, label_color, label_scale)
 
         mass = math.pi * self._radius**2
         self.body = pymunk.Body(mass, pymunk.moment_for_circle(mass, 0, self._radius))
@@ -81,6 +124,12 @@ class Ball:
         """Whether the ball leaves a fading trail (FR-303); visual only."""
         self.glow: float = glow_value
         """Glow intensity in [0, 4], 0 = no glow (FR-304); visual only."""
+        self.label: str | None = label_value
+        """Text or emoji drawn centred on the ball (FR-605); visual only, settable."""
+        self.label_color: Color | None = label_rgb
+        """Label colour, or ``None`` for auto contrast with the drawn ball colour."""
+        self.label_scale: float = scale_value
+        """Label font size as a multiple of the radius."""
         self._color_mode: Dynamic | None = None
         self.hue_mode: HueCycle | None = None
         """The hue cycle this ball was created or recoloured with (FR-306), else ``None``."""

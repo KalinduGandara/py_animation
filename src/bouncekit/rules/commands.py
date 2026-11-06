@@ -72,6 +72,9 @@ class BallSpec:
     constant_speed: bool = False
     trail: bool = False
     glow: float = 0.0
+    label: str | None = None
+    label_color: Color | None = None
+    label_scale: float = 1.0
 
 
 @dataclass(frozen=True, eq=False)
@@ -219,6 +222,9 @@ def _split(scene: "Scene", cmd: SplitCmd) -> None:
             parent.constant_speed,
             parent.trail,
             parent.glow,
+            parent.label,
+            parent.label_color,
+            parent.label_scale,
         )
         child = scene._spawn_ball(spec, generation=parent.generation)
         scene._inherit(parent, child)

@@ -29,7 +29,7 @@ from bouncekit.config import (
 )
 from bouncekit.errors import ConfigError
 from bouncekit.sound import Melody, Note, Scale, Source
-from bouncekit.world.ball import Ball
+from bouncekit.world.ball import Ball, label_options
 from bouncekit.world.circle import CircleBoundary
 from bouncekit.world.polygon import Polygon
 
@@ -143,6 +143,9 @@ class Spawn:
     constant_speed: bool = False
     trail: bool = False
     glow: float = 0.0
+    label: str | None = None
+    label_color: Color | None = None
+    label_scale: float = 1.0
 
     def run(self, ctx: "ActionContext") -> None:
         """Evaluate the values now (in ball order) and queue the new balls."""
@@ -369,6 +372,9 @@ def spawn(
     max_total: int | None = None,
     trail: bool = False,
     glow: float | bool = 0.0,
+    label: str | None = None,
+    label_color: ColorLike | None = None,
+    label_scale: float = 1.0,
 ) -> Spawn:
     """Return an action that adds ``count`` balls of ``radius`` (FR-207).
 
@@ -385,7 +391,8 @@ def spawn(
 
     With ``constant_speed=True`` each ball keeps its initial speed (FR-212, see
     ``Scene.add_ball``); that speed must be > 0 and <= ``config.max_speed``.
-    ``trail`` and ``glow`` are the visual options of ``Scene.add_ball`` (FR-303, FR-304).
+    ``trail``, ``glow`` and ``label``/``label_color``/``label_scale`` are the visual
+    options of ``Scene.add_ball`` (FR-303, FR-304, FR-605).
 
     Raises:
         ConfigError: for an invalid value (a callable's result is checked when it
@@ -396,6 +403,7 @@ def spawn(
     """
     _positive_int("count", count)
     _bool("constant_speed", constant_speed)
+    text, text_color, text_scale = label_options(label, label_color, label_scale)
     if constant_speed and not callable(velocity) and _vec("velocity", velocity) == (0.0, 0.0):
         raise ConfigError("constant_speed needs a non-zero velocity; got (0, 0)")
     return Spawn(
@@ -410,6 +418,9 @@ def spawn(
         constant_speed=constant_speed,
         trail=_trail(trail),
         glow=_glow(glow),
+        label=text,
+        label_color=text_color,
+        label_scale=text_scale,
     )
 
 

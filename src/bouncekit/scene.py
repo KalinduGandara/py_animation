@@ -52,7 +52,7 @@ from bouncekit.rules.commands import BallSpec, Command, apply
 from bouncekit.rules.engine import SUBJECTS, Rule, RuleEngine, RuleKind
 from bouncekit.sound import Melody, Note, Scale
 from bouncekit.text import Text, make_text
-from bouncekit.world.ball import Ball
+from bouncekit.world.ball import Ball, label_color_for
 from bouncekit.world.circle import CircleBoundary
 from bouncekit.world.polygon import Polygon
 
@@ -705,6 +705,9 @@ class Scene:
             tags=spec.tags,
             trail=spec.trail,
             glow=spec.glow,
+            label=spec.label,
+            label_color=spec.label_color,
+            label_scale=spec.label_scale,
         )
         ball.generation = generation
         if not plain:
@@ -837,6 +840,9 @@ class Scene:
         constant_speed: bool = False,
         trail: bool = False,
         glow: float | bool = 0.0,
+        label: str | None = None,
+        label_color: ColorLike | None = None,
+        label_scale: float = 1.0,
     ) -> Ball:
         """Add a dynamic ball; its speed is clamped to ``config.max_speed``.
 
@@ -852,6 +858,11 @@ class Scene:
         ball's diameter (length ``effects.trail_seconds``); ``glow`` (0..4, or a bool
         for 1/0) adds a blurred light in the ball's drawn colour. Split children and
         spawned balls inherit both from their parent.
+
+        ``label`` (FR-605) is text or an emoji drawn centred on the ball at font size
+        ``label_scale * radius``, over the glow, in ``label_color`` or, if ``None``,
+        dark on light balls and white on dark ones. Split children copy the label;
+        ``ball.label`` can be changed at any time (visual only).
 
         Raises:
             ConfigError: if any option is invalid, the scene already has
@@ -880,6 +891,9 @@ class Scene:
             tags=tags,
             trail=trail,
             glow=glow,
+            label=label,
+            label_color=label_color,
+            label_scale=label_scale,
         )
         for ring in self._rings:
             self._check_tunnelling(ball, ring)
@@ -1013,7 +1027,8 @@ class Scene:
         in insertion order; impact particles (FR-305); the glow layer (only while an
         object has ``glow``); then visible text overlays (FR-406). An
         object flashing at the current frame (``A.flash``) is drawn, and glows, in its
-        flash colour blended linearly back to its base colour. Drawing never changes
+        flash colour blended linearly back to its base colour. Ball labels are drawn
+        after the glow layer and before text overlays (FR-605). Drawing never changes
         the simulation; it only updates effect state keyed on ``frame``, so redrawing
         a frame gives the same image.
         """
@@ -1031,6 +1046,7 @@ class Scene:
                 renderer.trails(segments, keep=keep, reset=reset)
         flashes = self._flash
         lights: list[GlowDisc | GlowArc] = []
+        labels: list[tuple[str, Vec, float, Color]] = []
         for obj in self._objects:
             color: Color | None = None
             if flashes:
@@ -1038,6 +1054,10 @@ class Scene:
                 if state is not None:
                     color = _flash_color(state, obj.color, self.frame)
             obj.draw(renderer, color)
+            if isinstance(obj, Ball) and obj.label:
+                shown = obj.color if color is None else color
+                ink = obj.label_color or label_color_for(shown)
+                labels.append((obj.label, obj.position, obj.label_scale * obj.radius, ink))
             if obj.glow > 0:
                 drawn = obj.color if color is None else color
                 if isinstance(obj, Ball):
@@ -1050,6 +1070,8 @@ class Scene:
             renderer.circle((p.x, p.y), p.size, p.color, alpha=1 - p.age / p.life)
         if lights:
             renderer.glow(lights, blur=effects.glow_blur)
+        for label, center, size, ink in labels:  # over the glow, under overlays (FR-605)
+            renderer.text(label, center, size, ink)
         for item in self._texts:
             if item.visible(self.frame):
                 self._draw_text(renderer, item)

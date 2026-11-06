@@ -151,6 +151,9 @@ class ActionContext:
         max_total: int | None = None,
         trail: bool = False,
         glow: float | bool = 0.0,
+        label: str | None = None,
+        label_color: ColorLike | None = None,
+        label_scale: float = 1.0,
     ) -> None:
         """Queue ``count`` new balls; options and refusal rules as ``A.spawn`` (FR-207).
 
@@ -174,6 +177,9 @@ class ActionContext:
                 max_total=max_total,
                 trail=trail,
                 glow=glow,
+                label=label,
+                label_color=label_color,
+                label_scale=label_scale,
             )
         )
 
@@ -198,6 +204,9 @@ class ActionContext:
                     action.constant_speed,
                     action.trail,
                     action.glow,
+                    action.label,
+                    action.label_color,
+                    action.label_scale,
                 )
             )
         self.scene._queue.append(SpawnCmd(tuple(specs), action.max_total))

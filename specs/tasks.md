@@ -280,7 +280,7 @@ Same per-task loop: tests first → implement → gate (`uv run pytest -q && uv 
     - `"👇"` draws non-background pixels where the default font would draw a tofu box (differs from rendering the bare default font), and `"A👇"` is centred on its total advance.
     - U+FE0F is dropped (`"❤️"` == `"❤"` bytes); same calls give the same bytes.
 
-- [ ] T-604: Ball labels.
+- [x] T-604: Ball labels.
   - Requirements: FR-605, NFR-601
   - Files: src/bouncekit/world/ball.py, scene.py, rules/commands.py, rules/context.py, actions.py; tests/test_labels.py (new)
   - Done when these tests pass:
