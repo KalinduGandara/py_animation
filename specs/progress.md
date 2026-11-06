@@ -148,7 +148,7 @@ M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engi
   (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
   Metadata `duration` reports the configured length even when `end_after` ends a video early
   (frames are correct). Preview is silent.
-- **Possible next steps (ask the user):** more video ideas with the skill; commit the scenes;
-  the rest of M5 if a brief needs moving shapes or camera moves.
+- **Next steps:** see `specs/roadmap.md` (researched video backlog, proposed framework
+  items F1–F10 as M6, growth playbook). Ask the user which to start; nothing there is built.
 - **Lessons for writing scenes:** `.claude/skills/bouncekit-video/SKILL.md` § "Lessons from past
   scenes".

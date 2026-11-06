@@ -1,6 +1,6 @@
 # bouncekit
 
-Python framework for deterministic 2D physics "satisfying" videos (vertical MP4). New session: start with `specs/progress.md` § "Where we left off" and README § "What you can make". Specs are the source of truth: read `specs/` first (`srs.md` = original requirements, `requirements.md`, `design.md`, `tasks.md`, `progress.md`, `clarifications.md`). Work milestone by milestone (M0..M5); never build later milestones early.
+Python framework for deterministic 2D physics "satisfying" videos (vertical MP4). New session: start with `specs/progress.md` § "Where we left off" and README § "What you can make"; plans and video ideas are in `specs/roadmap.md`. Specs are the source of truth: read `specs/` first (`srs.md` = original requirements, `requirements.md`, `design.md`, `tasks.md`, `progress.md`, `clarifications.md`). Work milestone by milestone (M0..M5); never build later milestones early.
 
 ## Stack
 Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (from M3), ffmpeg (subprocess). Dev: pytest, ruff, mypy.
