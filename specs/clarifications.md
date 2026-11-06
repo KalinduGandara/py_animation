@@ -194,7 +194,9 @@ Made by the spec author with the recommended default (the user delegated these).
   Reason: generic event counts cannot tell how close a race was.
 - G2. **Metadata `duration` becomes the rendered length, `frames / fps`** (rounded to 6
   decimals), fixing the caveat that it reported the configured length when `end_after` ended
-  early. Unended renders keep the same value. MP4 bytes are unaffected.
+  early. Unended renders keep the same value when `duration × fps` is whole (review 2026-11-06:
+  otherwise the rounded frame count's length is reported, which is the truth). MP4 bytes are
+  unaffected.
 - G3. **`--score EXPR` is a whitelisted arithmetic expression** parsed with `ast`, never `eval`:
   numbers, `+ - * / // % **`, unary `+`/`-`, `abs`/`min`/`max`/`round`, names `duration`,
   `frames`, `seed`, `sound_triggers`, and attributes `stats.<name>`, `events.<kind>`,

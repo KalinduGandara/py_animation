@@ -129,3 +129,36 @@ def test_glow_types_unchanged() -> None:  # labels never become lights
 
     scene.draw(Lights(200, 200))
     assert len(lights) == 1 and isinstance(lights[0], GlowDisc | GlowArc)
+
+
+# Review fixes (2026-11-06).
+def test_sub_pixel_label_is_skipped_not_a_crash() -> None:
+    scene = _scene()
+    scene.add_ball(pos=(100, 100), radius=20, label="x", label_scale=0.0001)
+    spy = Spy(200, 200)
+    scene.draw(spy)
+    assert not [c for c in spy.calls if c[0] == "text"]
+
+
+def test_ctx_spawn_validates_label() -> None:
+    scene = _scene()
+    scene.add_ball(pos=(100, 100), radius=5, tags={"ball"})
+
+    @scene.at(0.01)
+    def boom(ctx, event):  # type: ignore[no-untyped-def]
+        ctx.spawn(pos=(50, 50), radius=5, label_scale=-1)
+
+    with pytest.raises(ConfigError, match="label_scale"):
+        for _ in range(3):
+            scene.step_frame()
+
+
+def test_auto_contrast_follows_the_flash_colour() -> None:
+    scene = _scene()
+    ball = scene.add_ball(pos=(100, 100), radius=20, color="#101040", label="A", tags={"b"})
+    scene.at(0.01, [A.flash(target=ball, color="#ffffff", seconds=1.0)])
+    for _ in range(2):
+        scene.step_frame()
+    spy = Spy(200, 200)
+    scene.draw(spy)
+    assert [c[4] for c in spy.calls if c[0] == "text"] == [(17, 17, 17)]

@@ -24,7 +24,8 @@ def write_pack(scene: "Scene", video: Path) -> list[Path]:
     """Write the thumbnail (``scene.climax_image``) and, if set, the post text.
 
     Call after the scene has been rendered. Returns the paths written; the post file
-    is skipped when the scene never called ``scene.post``.
+    is skipped (and a stale one from an earlier render removed) when the scene never
+    called ``scene.post``.
 
     Raises:
         ConfigError: if the post's title/description callables return bad text.
@@ -38,7 +39,9 @@ def write_pack(scene: "Scene", video: Path) -> list[Path]:
     size = (scene.config.width, scene.config.height)
     pygame.image.save(pygame.image.frombuffer(image, size, "RGB"), str(thumb))
     written = [thumb]
-    if text is not None:
+    if text is None:
+        post.unlink(missing_ok=True)
+    else:
         post.write_text(text, encoding="utf-8")
         written.append(post)
     return written

@@ -136,3 +136,35 @@ def test_batch_export_and_keep_best_remove_loser_packs(tmp_path: Path) -> None:
         "pack_scene_seed2_thumb.png", "ranking.json",
     ]  # fmt: skip
     assert json.loads((tmp_path / "ranking.json").read_text())[1]["kept"] is False
+
+
+# Review fixes (2026-11-06).
+def test_reexport_without_post_removes_stale_post_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _render(tmp_path, "--export")
+    assert (tmp_path / "v_post.txt").exists()
+    _render(tmp_path, "--export", "--set", "post=false")
+    assert not (tmp_path / "v_post.txt").exists()
+    assert "note: no scene.post(...)" in capsys.readouterr().out
+
+
+def test_title_must_be_one_line() -> None:
+    with pytest.raises(ConfigError, match="title"):
+        Scene(duration=0.1).post(title="x\nDESCRIPTION")
+
+
+def test_ctx_mark_climax_and_same_seed_same_thumbnail() -> None:
+    def run() -> Scene:
+        scene = Scene(width=32, height=32, fps=30, duration=0.5, seed=4)
+        scene.add_ball(pos=(16, 8), radius=3, velocity=(scene.rng.uniform(-50, 50), 0))
+
+        @scene.at(0.2)
+        def mark(ctx, event):  # type: ignore[no-untyped-def]
+            ctx.mark_climax()
+
+        list(scene.frames())
+        return scene
+
+    a, b = run(), run()
+    assert a.climax_frame == 6 and a.climax_image == b.climax_image

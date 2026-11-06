@@ -108,3 +108,43 @@ def test_keep_best_deletes_the_rest(tmp_path: Path) -> None:
 def test_no_ranking_without_score(tmp_path: Path) -> None:
     assert _batch(tmp_path, "--seeds", "1") == 0
     assert not (tmp_path / "ranking.json").exists()
+
+
+# Review fixes (2026-11-06): type errors and deep nesting must not crash a batch.
+@pytest.mark.parametrize("expr", ["abs(1, 2)", "round(1, 2, 3)", "min(stats.blue)", "max(1)"])
+def test_wrong_arity_is_rejected_at_compile_time(expr: str) -> None:
+    with pytest.raises(ConfigError, match="--score"):
+        compile_score(expr)
+
+
+def test_round_with_digits_works() -> None:
+    assert compile_score("round(stats.blue - stats.pink, 2)").evaluate(META) == 0.08
+    with pytest.raises(ScoreError):
+        compile_score("round(1, 0.5)").evaluate(META)
+
+
+def test_complex_result_is_a_score_error() -> None:
+    with pytest.raises(ScoreError):
+        compile_score("(0 - stats.blue) ** 0.5").evaluate(META)
+
+
+@pytest.mark.parametrize("depth", [2000, 50000])
+def test_deep_nesting_is_a_config_error(depth: int) -> None:
+    with pytest.raises(ConfigError, match="--score"):
+        compile_score("-" * depth + "1")
+
+
+def test_runtime_type_error_still_writes_ranking(tmp_path: Path) -> None:
+    code = _batch(tmp_path, "--seeds", "1", "--score", "(0 - stats.hits - 1) ** 0.5")
+    assert code == 0
+    entries = _ranking(tmp_path)
+    assert entries[0]["score"] is None and entries[0]["error"]
+
+
+def test_keep_best_removes_unscored_entries(tmp_path: Path) -> None:
+    code = _batch(tmp_path, "--seeds", "1", "--grid", "missing=true,false",
+                  "--score", "stats.hits", "--keep-best", "1")  # fmt: skip
+    assert code == 0
+    entries = _ranking(tmp_path)
+    assert [e["kept"] for e in entries] == [True, False]
+    assert not (tmp_path / "stats_scene_seed1_missing-true.mp4").exists()

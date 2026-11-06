@@ -34,11 +34,23 @@ _UNARY: dict[type[ast.unaryop], Callable[[float], float]] = {
     ast.UAdd: operator.pos,
     ast.USub: operator.neg,
 }
+def _round(value: float, digits: float = 0.0) -> float:
+    if not float(digits).is_integer():
+        raise ValueError(f"round() digits must be a whole number; got {digits!r}")
+    return float(round(value, int(digits)))
+
+
 _CALLS: dict[str, Callable[..., float]] = {
     "abs": abs,
     "min": min,
     "max": max,
-    "round": round,
+    "round": _round,
+}
+_ARITY: dict[str, tuple[int, int | None]] = {  # (min, max) positional arguments
+    "abs": (1, 1),
+    "round": (1, 2),
+    "min": (2, None),
+    "max": (2, None),
 }
 
 
@@ -69,8 +81,11 @@ def _check(node: ast.AST, expr: str) -> None:
     elif isinstance(node, ast.Call):
         if not isinstance(node.func, ast.Name) or node.func.id not in _CALLS:
             raise bad("this call")
-        if node.keywords or not node.args:
-            raise bad(f"{node.func.id}() without positional arguments")
+        low, high = _ARITY[node.func.id]
+        count = len(node.args)
+        if node.keywords or count < low or (high is not None and count > high):
+            shown = f"{low}" if low == high else f"{low}+" if high is None else f"{low}-{high}"
+            raise bad(f"{node.func.id}() with {count} argument(s) (takes {shown}, positional)")
         for arg in node.args:
             _check(arg, expr)
     elif isinstance(node, ast.Name):
@@ -107,7 +122,7 @@ class Score:
         """
         try:
             value = self._eval(self.tree.body, metadata)
-        except (ArithmeticError, ValueError) as exc:
+        except (ArithmeticError, ValueError, TypeError) as exc:
             raise ScoreError(f"{type(exc).__name__}: {exc}") from exc
         if not math.isfinite(value):
             raise ScoreError(f"score is not finite: {value!r}")
@@ -146,9 +161,11 @@ def compile_score(expr: str) -> Score:
     """
     try:
         tree = ast.parse(expr, mode="eval")
+        _check(tree, expr)
     except SyntaxError as exc:
         raise ConfigError(f"--score: cannot parse {expr!r}: {exc.msg}") from exc
-    _check(tree, expr)
+    except (RecursionError, MemoryError) as exc:
+        raise ConfigError(f"--score: expression is nested too deeply ({len(expr)} chars)") from exc
     return Score(expr, tree)
 
 

@@ -60,6 +60,7 @@
 - 2026-11-06: T-605 done: `Scene(loop_fade=s)` (`SceneConfig.loop_fade`, validated >= 0): `frames()` holds the latest round(s*fps) frames in a deque until the end is known (so `end_after` works), then blends the last N = min(round(s*fps), frames-1) with frame 0 at t = i/(N+1); `audio_buffer()` of a finished video applies `export.audio.fade_out` (linear 1->0) over the window's samples, so `render` muxes the faded mix; loop_fade=0 takes the old code path; tests in tests/test_loop_fade.py; gate passes.
 - 2026-11-06: T-606 done: `A.mark_climax`/`ctx.mark_climax` (`MarkClimaxCmd`, next drawn frame, last wins; first `EndCmd` records the default), `scene.climax_frame`/`climax_image` (captured in `frames()` before the loop fade; last frame when no climax or it is never drawn, e.g. `end_after(0)`: FR-609 text updated), `scene.post`/`post_text` (`export/post.py`: title 1-100, description <= 5000, callables evaluated after render, hashtags normalised), `--export` on render/batch (`export/pack.py`: `<stem>_thumb.png`, `<stem>_post.txt`, note when no post), `batch.remove_outputs` also removes pack files (failures, --keep-best); tests in tests/test_export_pack.py (fixture pack_scene.py); gate passes.
 - 2026-11-06: T-607 done: `examples/team_race.py` (3 labelled balls incl. 🔥 race to escape a spinning gap; stats escape_time/winner_index, loop_fade 0.4, ctx.mark_climax + end_after(2), scene.post with the real winner), README § Upload helpers (M6) + capability rows + metadata note, CLAUDE.md commands, skill guide notes; full render seed 3: 344 frames (5.73 s) in 11.3 s wall, thumbnail = escape frame with 'GO WINS!', post title 'GO escaped first!…', 11 sound triggers; tests in tests/test_example.py; gate passes.
+- 2026-11-06: M6 review fixes (fresh-eyes subagent review; regression tests first) [FR-602, FR-603, FR-605, FR-610, FR-611, NFR-603]: (1) \`--score\` crashed the batch after rendering on \`TypeError\` (\`abs(1,2)\`, \`round(x, 2)\`, complex \`**\`): argument counts are now checked at compile time (exit 2), \`round(x, n)\` is supported, \`TypeError\` becomes a per-job \`ScoreError\`; (2) deeply nested expressions raised \`RecursionError\`/\`MemoryError\`: now \`ConfigError\`; (3) a stale \`<stem>_post.txt\` survived an \`--export\` re-render without \`scene.post\` (and hid the note): \`write_pack\` removes it; (4) \`label_scale x radius < 1\` crashed freetype mid-render: sub-pixel labels are skipped silently; (5) FR-602/G2 clarified for \`duration x fps\` not whole (spec only); (6) frame 0 is kept as uint8 for NFR-603; (7) post titles must be one line. Tests added for \`ctx.mark_climax\`, \`ctx.spawn(label=)\`, flash-colour contrast, same-seed thumbnails, keep-best of unscored entries. Known and accepted: \`remove_outputs\` also deletes pack files of a failed render without \`--export\`. Gate passes.
 
 ## Traceability (requirement -> tests)
 
@@ -125,6 +126,20 @@
 | NFR-301 / NFR-303 (example, docs) | test_example.py::test_readme_covers_m3; tests/test_perf.py |
 | FR-501 (runtime rings) | tests/test_add_ring.py |
 | FR-502 / FR-503 (polygons) | tests/test_polygon.py |
+| FR-601 (stats) | test_stats.py: test_stat_records_replaces_and_keeps_order, test_stat_rejects_bad_input, test_stats_do_not_change_simulation |
+| FR-602 (metadata stats, duration) | test_stats.py: test_metadata_has_stats_after_sound_triggers, test_metadata_without_stats_keeps_m4_keys, test_duration_is_rendered_length; test_metadata.py (M4, unmodified) |
+| FR-603 (--score, ranking) | test_scoring.py: test_evaluates_allowed_expressions, test_rejects_disallowed_expressions, test_unscorable_metadata_raises_score_error, test_batch_writes_ranking_sorted_by_score, test_unscorable_job_ranks_last_with_error, test_bad_score_options_exit_2_before_any_job, test_no_ranking_without_score |
+| FR-604 (--keep-best) | test_scoring.py::test_keep_best_deletes_the_rest; test_export_pack.py::test_batch_export_and_keep_best_remove_loser_packs |
+| FR-605 (labels) | test_labels.py (all) |
+| FR-606 (emoji) | test_emoji.py (all) |
+| FR-607 / FR-608 (loop fade) | test_loop_fade.py (all) |
+| FR-609 (climax) | test_export_pack.py: test_mark_climax_sets_next_frame_last_call_wins, test_default_climax_is_frame_after_first_end_after, test_climax_image_falls_back_to_last_frame, test_climax_image_is_taken_before_the_loop_fade, test_marks_do_not_change_the_simulation |
+| FR-610 (post) | test_export_pack.py::test_post_text_format_and_validation |
+| FR-611 (--export) | test_export_pack.py: test_render_export_writes_thumbnail_and_post, test_export_without_post_writes_only_thumbnail, test_no_pack_without_export, test_failed_job_leaves_no_pack, test_batch_export_and_keep_best_remove_loser_packs |
+| FR-612 (example, docs) | test_example.py: test_team_race_uses_m6_features, test_team_race_export_render, test_readme_covers_m6 |
+| NFR-601 | test_emoji.py::test_default_font_text_keeps_pre_m6_bytes; test_labels.py::test_label_free_example_keeps_frame_bytes; test_loop_fade.py::test_zero_fade_keeps_frames_and_audio; all M0–M5 tests unmodified |
+| NFR-602 | test_emoji.py::test_font_and_licence_ship_in_the_package; no new dependency in pyproject.toml |
+| NFR-603 | test_loop_fade.py::test_delay_line_holds_at_most_n_plus_one_frames |
 
 ## Status
 

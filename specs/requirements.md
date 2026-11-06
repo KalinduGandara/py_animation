@@ -493,7 +493,8 @@ user on 2026-11-06 together with the answers and assumptions G1–G11 in `clarif
 - WHEN the scene recorded at least one stat, THE metadata JSON SHALL contain `"stats"` (name →
   value) directly after `"sound_triggers"`; otherwise the key set and order SHALL be exactly M4's.
 - `"duration"` SHALL be the rendered length `round(frames / fps, 6)`. A render that is not ended
-  early SHALL keep the configured value.
+  early SHALL keep the configured value whenever `duration × fps` is a whole number (otherwise
+  the frame count was already rounded, and the rendered length is reported).
 
 ### FR-603 Batch scoring — [F2], [G3], [G4]
 - `bouncekit batch … --score EXPR` SHALL score every successful job from its metadata with the
@@ -572,7 +573,8 @@ user on 2026-11-06 together with the answers and assumptions G1–G11 in `clarif
 - **NFR-602 Dependencies and licence**: no new runtime dependency; the only new asset is the
   Noto Emoji font with its SIL OFL 1.1 licence. pytest, ruff and mypy pass; the suite stays
   < 120 s.
-- **NFR-603 Memory**: the loop-fade delay line holds at most N + 1 frames (N from G7).
+- **NFR-603 Memory**: the loop-fade delay line holds at most N + 1 frames (N from G7), frame 0
+  included, all as RGB24 bytes.
 
 ### Out of scope for M6 part 1
 - F3–F6, F9, F10; 4:5 and 1:1 crops.

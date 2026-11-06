@@ -31,6 +31,8 @@ def _check_text(name: str, value: object, *, required: bool, limit: int) -> None
         raise ConfigError(f"{name} must be a str or a callable; got {value!r}")
     if required and not value.strip():
         raise ConfigError(f"{name} must not be empty")
+    if required and "\n" in value:  # the title is one line of the post file
+        raise ConfigError(f"{name} must be one line; got {value!r}")
     if len(value) > limit:
         raise ConfigError(f"{name} must be at most {limit} characters; got {len(value)}")
 

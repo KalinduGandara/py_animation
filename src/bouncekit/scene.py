@@ -1117,8 +1117,8 @@ class Scene:
                 if state is not None:
                     color = _flash_color(state, obj.color, self.frame)
             obj.draw(renderer, color)
-            if isinstance(obj, Ball) and obj.label:
-                shown = obj.color if color is None else color
+            if isinstance(obj, Ball) and obj.label and obj.label_scale * obj.radius >= 1:
+                shown = obj.color if color is None else color  # sub-pixel labels: skipped
                 ink = obj.label_color or label_color_for(shown)
                 labels.append((obj.label, obj.position, obj.label_scale * obj.radius, ink))
             if obj.glow > 0:
@@ -1171,14 +1171,14 @@ class Scene:
         # Loop fade (FR-607): ``end_after`` can move the end, so hold the latest
         # ``target`` frames until it is known, then blend the last N with frame 0.
         target = round(self.config.loop_fade * self.config.fps)
-        first: NDArray[np.float32] | None = None
+        first: NDArray[np.uint8] | None = None  # frame 0, one frame of memory
         held: deque[bytes] = deque()
         while self.frame < self.total_frames:
             self.draw(renderer)
             data = renderer.to_rgb_bytes()
             self._capture(data)
             if first is None:
-                first = np.frombuffer(data, np.uint8).astype(np.float32)
+                first = np.frombuffer(data, np.uint8)
             held.append(data)
             if len(held) > target:
                 yield held.popleft()
@@ -1276,10 +1276,11 @@ class Scene:
         raise SystemExit(cli.main(sys.argv[1:], default_scene=Path(sys.argv[0])))
 
 
-def _blend(frame: bytes, first: NDArray[np.float32], t: float) -> bytes:
+def _blend(frame: bytes, first: NDArray[np.uint8], t: float) -> bytes:
     """``frame`` moved ``t`` of the way towards ``first`` (RGB24, rounded to nearest)."""
     a = np.frombuffer(frame, np.uint8).astype(np.float32)
-    return bytes(np.rint(a + (first - a) * np.float32(t)).astype(np.uint8).tobytes())
+    b = first.astype(np.float32)
+    return bytes(np.rint(a + (b - a) * np.float32(t)).astype(np.uint8).tobytes())
 
 
 def _check_tag(name: str, tag: object) -> None:
