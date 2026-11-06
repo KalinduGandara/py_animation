@@ -379,3 +379,29 @@ def test_param_sweep_short_sweep_varies_by_seed_and_has_sound(tmp_path: Path) ->
     assert one.read_bytes() != two.read_bytes()
     for mp4 in (one, two):
         assert json.loads(mp4.with_suffix(".json").read_text())["sound_triggers"] > 0
+
+
+STATIC_SHAPES = EXAMPLE.parent / "static_shapes.py"
+
+
+def test_static_shapes_example_exercises_polygons() -> None:
+    """FR-502: setup polygons, runtime ctx.add_polygon, polygon recolor/destroy, sound."""
+    from bouncekit import Polygon
+
+    scene = load_scene(STATIC_SHAPES, seed=42, duration=8.0)
+    pegs = [o for o in scene.objects if isinstance(o, Polygon)]
+    assert len(pegs) > 20 and all("peg" in p.tags for p in pegs)
+    colors = {p.color for p in pegs}
+    while scene.frame < scene.total_frames:
+        scene.step_frame()
+    assert scene.count("stone") > 0  # landed balls became runtime polygons
+    assert scene.count("peg") < len(pegs)  # some pegs broke
+    assert any(p.alive and p.color not in colors for p in pegs)  # recoloured by hits
+    assert scene.triggers  # it has sound
+
+
+def test_readme_covers_capabilities_and_m5_early() -> None:
+    text = (EXAMPLE.parent.parent / "README.md").read_text()
+    for word in ("What you can make", "add_polygon", "ctx.add_polygon", "ctx.add_circle",
+                 "static_shapes.py"):  # fmt: skip
+        assert word in text

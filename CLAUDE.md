@@ -1,6 +1,6 @@
 # bouncekit
 
-Python framework for deterministic 2D physics "satisfying" videos (vertical MP4). Specs are the source of truth: read `specs/` first (`srs.md` = original requirements, `requirements.md`, `design.md`, `tasks.md`, `progress.md`, `clarifications.md`). Work milestone by milestone (M0..M5); never build later milestones early.
+Python framework for deterministic 2D physics "satisfying" videos (vertical MP4). New session: start with `specs/progress.md` § "Where we left off" and README § "What you can make". Specs are the source of truth: read `specs/` first (`srs.md` = original requirements, `requirements.md`, `design.md`, `tasks.md`, `progress.md`, `clarifications.md`). Work milestone by milestone (M0..M5); never build later milestones early.
 
 ## Stack
 Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (from M3), ffmpeg (subprocess). Dev: pytest, ruff, mypy.
@@ -15,6 +15,7 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Render with sound (M1): `uv run bouncekit render examples/bounce_notes.py`
 - Make a video from a plain-language prompt: use the `bouncekit-video` skill (`.claude/skills/bouncekit-video/`); scenes go in `scenes/`.
 - Rules examples (M2): `uv run bouncekit render examples/split_on_wall.py` (also `escape_rotating_gap.py`, `destroy_on_contact.py`)
+- Static shapes (M5 early): `uv run bouncekit render examples/static_shapes.py` (polygons at setup and from rules)
 - Melody + effects (M3): `uv run bouncekit render examples/midi_melody.py`; preview hot-reloads the scene file on save
 - Regenerate assets (M3): `uv run python scripts/make_assets.py` (writes `assets/midi/`, `assets/samples/`; output must stay byte-identical)
 - Params (M4): scripts declare `x = scene.param("x", default)`; override with `--set x=V` on render/preview/batch
@@ -31,4 +32,5 @@ Python 3.12 (uv), pymunk 7.3.1, pygame-ce, numpy, soundfile (from M1), mido (fro
 - Effects (M3: trails, glow, particles, colour modes) are visual-only: never touch pymunk, `scene.rng` or `scene.events`; particle randomness uses `scene.fx_rng`; effect state advances per `scene.frame`, never per `draw` call. Effect-free scenes must keep M2 frame bytes; unpanned mixes must keep M1 audio bytes.
 - pymunk 7 API: `space.on_collision(...)`, `space.add_post_step_callback(...)` — don't copy pre-7 examples.
 - Per task: tests first; tick `specs/tasks.md`; append to `specs/progress.md`; commit `feat(area): T-<id> desc [FR-…]`.
+- M5 pulled forward at the user's request (2026-11-06): only T-501 `ctx.add_circle` and T-502 static convex polygons (`add_polygon`, `ctx.add_polygon`, `Renderer.polygon`). The rest of M5 stays unbuilt until asked. Runtime rings/polygons are queued like other commands and refused silently on ball overlap.
 - No new runtime dependencies without asking the user (SRS stack — numpy, soundfile, mido, pymunk, pygame-ce — is approved).

@@ -122,3 +122,30 @@
 ## Status
 
 M0 complete and reviewed. M1 (audio) complete: T-101..T-104 done. M2 (rules engine) complete: T-201..T-205 done; M2 review fixes applied. M3 complete: T-301..T-306 done. M4 complete: T-401..T-405 done. M5: T-501 (runtime rings) and T-502 (static polygons) done early; the rest of M5 not started.
+
+### Where we left off (2026-11-06) — read this first in a new session
+
+- **Library:** M0–M4 complete. From M5, only T-501 (`ctx.add_circle`) and T-502 (static convex
+  polygons: `scene.add_polygon`, `ctx.add_polygon`, `Renderer.polygon`) are built, at the user's
+  request. Everything else in M5 (dynamic polygons, segments, joints, camera) is not started and
+  should only be built when the user asks. Full suite, ruff and mypy pass.
+- **What can be made today:** README § "What you can make" maps every capability to its API and
+  to a file that shows it. Examples (`examples/*.py`) are tested in tests/test_example.py;
+  `examples/static_shapes.py` covers the M5-early features.
+- **Videos made with the `bouncekit-video` skill** (`scenes/`, renders in `out/`, not tracked):
+  - `layer_breaker.py`: one ball breaks 10 nested spinning rings (~29 s). User: good as is.
+  - `last_survivor.py`: infection where infected balls die after `lifespan` s; seed 5 ends
+    "7 SURVIVED!" (~29 s). User: good as is.
+  - `fill_the_circle.py`: a solid jagged wall grows where the ball hits until only a
+    ball-sized pocket is left (`snug` x ball area), Für Elise per hit (~29 s). Look via
+    `--set color= color2= texture=solid|rings|gradient|rainbow|checker band=`. Latest user
+    feedback addressed; awaiting their next review.
+  - Older: `neon_escape_counter.py`, `split_twinkle_256.py`.
+- **Known caveats:** a hit only grows the wall in `fill_the_circle.py` once the ball is clear
+  (pending hits expire after 1 s); a jam fallback re-aims a ball that has not moved for 0.5 s.
+  Metadata `duration` reports the configured length even when `end_after` ends a video early
+  (frames are correct). Preview is silent.
+- **Possible next steps (ask the user):** more video ideas with the skill; commit the scenes;
+  the rest of M5 if a brief needs moving shapes or camera moves.
+- **Lessons for writing scenes:** `.claude/skills/bouncekit-video/SKILL.md` § "Lessons from past
+  scenes".

@@ -30,6 +30,40 @@ if __name__ == "__main__":
     scene.run()
 ```
 
+## What you can make
+
+Every row is built and tested. "Shown in" points at a file that uses it: `examples/` are
+small reference scenes (tested), `scenes/` are finished Shorts-style videos.
+
+| Capability | How | Shown in |
+|---|---|---|
+| Ball bouncing in a ring, with or without gravity | `Scene(gravity=)`, `add_circle`, `add_ball` | `examples/single_ball.py` |
+| Never-slowing motion | `add_ball(..., constant_speed=True)`, `gravity=(0, 0)` | `examples/split_on_wall.py` |
+| Rotating ring with a gap, escapes | `add_circle(gap_degrees=, angular_velocity=)`, `on_escape` | `examples/escape_rotating_gap.py` |
+| Nested rings broken one by one | several `add_circle`, `on_escape` per ring + `ctx.destroy(ring)` | `scenes/layer_breaker.py` |
+| Split / multiply with a cap | `A.split(max_total=)`, `Scene(max_balls=)` | `examples/split_on_wall.py`, `scenes/split_twinkle_256.py` |
+| Spawn balls (on events or timers) | `A.spawn`, `every` (`at` for one-off times: README only) | `examples/escape_rotating_gap.py`, `examples/static_shapes.py` |
+| Hazards / destroy on contact | `A.destroy`, `ctx.destroy` | `examples/destroy_on_contact.py` |
+| Change a ball or wall mid-video | `A.recolor`/`resize`/`set_velocity`/`flash` (or `ctx.*`) | `scenes/last_survivor.py`, `scenes/layer_breaker.py` |
+| Infection / takeover (ball-ball rules) | `on_collision("ball", "ball")` + own state | `scenes/last_survivor.py` |
+| Solid static obstacles (pegs, floors, wedges) | `scene.add_polygon` (convex) | `examples/static_shapes.py` |
+| Walls that appear or grow mid-video | `ctx.add_polygon`, `ctx.add_circle` (queued, refused on ball overlap) | `examples/static_shapes.py`, `scenes/fill_the_circle.py` |
+| Endings | `when(...) + A.end_after`, `ctx.end_after` | `examples/destroy_on_contact.py`, `scenes/*` |
+| Notes on hits: scale, single note, melody | `A.play(S.scale / S.note / S.melody)` | `examples/bounce_notes.py`, `examples/midi_melody.py` |
+| Instrument voices | `"sine"`, `"triangle"`, `"pluck"`, `"marimba"`, `S.sample(wav)` | `examples/midi_melody.py` (kalimba) |
+| Any public-domain tune from note names | `.claude/skills/bouncekit-video/scripts/notes_to_midi.py` | `assets/midi/fur_elise.mid` |
+| Stereo pan by x position | `A.play(..., pan=)` | `examples/midi_melody.py` |
+| Trails, glow, impact particles | `trail=True`, `glow=`, `A.particles` | `examples/midi_melody.py` |
+| Colour modes | `C.hue_cycle`, `C.by_speed` (`C.by_generation`, `C.fixed`: README only) | `examples/midi_melody.py`, `examples/static_shapes.py` |
+| Fill colour / texture patterns (scene-level) | polygons coloured per band | `scenes/fill_the_circle.py` (`--set texture=rings`) |
+| Hook title, live counters | `add_text(str, end=)`, `add_text(lambda s: ...)` | `examples/param_sweep.py`, all `scenes/` |
+| Tweakable knobs, seed sweeps | `scene.param`, `--set`, `bouncekit batch` | `examples/param_sweep.py` |
+| Live preview with hot reload (silent) | `bouncekit preview` | any |
+
+Not built yet (rest of M5): moving/dynamic polygons, line segments, ramps as bodies,
+hinges/motors, dominoes, camera moves. Polygons are static and convex (non-convex shapes are
+built from several convex pieces, as `scenes/fill_the_circle.py` does). Preview has no audio.
+
 ## API overview
 
 - `Scene(width=1080, height=1920, fps=60, duration=60.0, seed=0, background="#000000",
@@ -38,6 +72,8 @@ if __name__ == "__main__":
 - `scene.add_circle(center, radius, thickness=8, color, gap_degrees=0,
   angular_velocity=0, segments=128, elasticity=1, tags=())` -> `CircleBoundary`.
 - `scene.add_ball(pos, radius, velocity=(0, 0), elasticity=1, color, tags=())` -> `Ball`.
+- `scene.add_polygon(points, color, elasticity=1, tags=())` -> `Polygon`: a static, solid
+  convex polygon drawn filled (see Rules for adding rings and polygons at runtime).
 - `scene.render(out)` encodes an MP4; `scene.preview(scale=0.45)` opens a window;
   `scene.run()` dispatches to the CLI (default `preview`).
 - Colours: `"#rrggbb"` strings or RGB tuples; see `bouncekit.colors`.
@@ -130,7 +166,8 @@ event; it is refused silently if a live ball overlaps it or could tunnel through
 `thickness >= 2 * radius` is a solid disc, e.g. a lump stuck where a ball hit.
 `scene.add_polygon(points=[...], color=, elasticity=1, tags=())` adds a static, solid convex
 polygon (the convex hull of the points), drawn filled; `ctx.add_polygon(...)` queues one the
-same way as `ctx.add_circle`. Polygons can be destroyed, recoloured and flashed.
+same way as `ctx.add_circle`. Polygons can be destroyed, recoloured and flashed. See
+`examples/static_shapes.py`.
 
 - **Cooldowns:** a collision rule skips its non-play handlers for a pair that fired
   less than `cooldown` seconds ago (default `Scene(rule_cooldown=0.05)`); `object_cooldown`
